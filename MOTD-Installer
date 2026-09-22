@@ -1,132 +1,603 @@
-\#!/bin/bash
-\# ==========================================
-\# RGNODES™ MOTD Installer (v3 PRO)
-\# FULL CLEAN + ONLY CUSTOM MOTD
-\# ==========================================
+#!/usr/bin/env bash
+# =============================================================================
+# RGNODES™ MOTD Installer v4.0 PRO
+# Full clean dynamic MOTD • SSH-safe • PAM-safe • Idempotent • Reversible
+# Supports Debian/Ubuntu • VM/LXC • systemd/non-systemd environments
+# =============================================================================
 
-set -e
+set -Eeuo pipefail
+IFS=$'\n\t'
 
-echo "🔧 Installing RGNODES™ Premium..."
+readonly SCRIPT_VERSION="4.0"
+readonly MOTD_SCRIPT="/etc/update-motd.d/00-rgnodes"
+readonly PAM_SNIPPET="/etc/pam.d/rgnodes-motd"
+readonly STATE_DIR="/var/lib/rgnodes-motd"
+readonly BACKUP_ROOT="/var/backups/rgnodes-motd"
+readonly LOG_FILE="/var/log/rgnodes-motd-install.log"
+readonly LOCK_FILE="/run/lock/rgnodes-motd.lock"
+readonly MOTD_MARKER="# RGNODES-MOTD-BEGIN"
+readonly MOTD_MARKER_END="# RGNODES-MOTD-END"
+readonly PAM_MARKER="# RGNODES-MOTD-INCLUDE"
 
-\# ================================
-\# REMOVE ALL OLD MOTD SYSTEM
-\# ================================
-echo "🧹 Removing old MOTD completely..."
+export LC_ALL=C
+umask 022
 
-\# Disable all default MOTD scripts
-chmod -x /etc/update-motd.d/\* 2>/dev/null || true
-
-\# Remove default files
-rm -f /etc/motd
-rm -f /var/run/motd
-rm -f /run/motd.dynamic
-
-\# Disable motd-news
-if [ -f /etc/default/motd-news ]; then
-    sed -i 's/ENABLED=1/ENABLED=0/g' /etc/default/motd-news
+exec 9>"$LOCK_FILE" || true
+if command -v flock >/dev/null 2>&1; then
+    flock -n 9 || { echo "❌ Another RGNODES™ MOTD installer is already running."; exit 1; }
 fi
 
-\# ================================
-\# FORCE ONLY OUR MOTD (PAM FIX)
-\# ================================
-echo "⚙ Configuring PAM..."
+log() {
+    local msg="$*"
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" | tee -a "$LOG_FILE" >/dev/null
+}
 
-\# Backup PAM files (safe)
-cp /etc/pam.d/sshd /etc/pam.d/sshd.bak 2>/dev/null || true
-cp /etc/pam.d/login /etc/pam.d/login.bak 2>/dev/null || true
+die() {
+    log "❌ ERROR: $*"
+    exit 1
+}
 
-\# Remove old motd lines
-sed -i '/pam_motd.so/d' /etc/pam.d/sshd
-sed -i '/pam_motd.so/d' /etc/pam.d/login
+cleanup() {
+    local rc=$?
+    if (( rc != 0 )); then
+        log "❌ Installer stopped with exit code $rc."
+    fi
+}
+trap cleanup EXIT
 
-\# Add ONLY our MOTD
-echo "session optional pam_exec.so stdout /etc/update-motd.d/00-atyrocloud" >> /etc/pam.d/sshd
-echo "session optional pam_exec.so stdout /etc/update-motd.d/00-atyrocloud" >> /etc/pam.d/login
+require_root() {
+    [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "Run this installer as root: sudo bash $0"
+}
 
-\# ================================
-\# CREATE PREMIUM MOTD SCRIPT
-\# ================================
-echo "✨ Creating RGNODES™..."
+detect_os() {
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_NAME="${PRETTY_NAME:-$OS_ID}"
+    OS_VERSION="${VERSION_ID:-unknown}"
 
-cat << 'EOF' > /etc/update-motd.d/00-atyrocloud
-\#!/bin/bash
+    case "$OS_ID" in
+        debian|ubuntu) ;;
+        *)
+            log "⚠️ Unsupported distribution: $OS_NAME"
+            log "This installer is designed for Debian/Ubuntu. Continuing cautiously."
+            ;;
+    esac
+}
 
-\# ===== Colors =====
-GREEN="\e[38;5;82m"
-CYAN="\e[38;5;51m"
-BLUE="\e[38;5;39m"
-MAGENTA="\e[38;5;213m"
-YELLOW="\e[38;5;220m"
-GRAY="\e[38;5;245m"
-RESET="\e[0m"
+timestamp() {
+    date '+%Y%m%d_%H%M%S'
+}
 
-\# ===== System Info (Optimized) =====
-HOSTNAME=$(hostname)
-OS=$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
-KERNEL=$(uname -r)
-UPTIME=$(uptime -p | sed 's/up //')
-CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8"%"}')
+make_backup_dir() {
+    local stamp
+    stamp="$(timestamp)"
+    BACKUP_DIR="${BACKUP_ROOT}/${stamp}"
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+}
 
-MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
-MEM_USED=$(free -m | awk '/Mem:/ {print $3}')
-MEM_PERC=$((MEM_USED \* 100 / MEM_TOTAL))
+backup_file() {
+    local src="$1"
+    local dst="$BACKUP_DIR$(dirname "$src")"
+    [[ -e "$src" || -L "$src" ]] || return 0
+    mkdir -p "$dst"
+    cp -a "$src" "$dst/"
+}
 
-DISK=$(df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')
+restore_file_from_backup() {
+    local src="$1"
+    local backup="$BACKUP_DIR$src"
+    [[ -e "$backup" || -L "$backup" ]] || return 0
+    mkdir -p "$(dirname "$src")"
+    rm -f "$src"
+    cp -a "$backup" "$src"
+}
 
-IP=$(hostname -I | awk '{print $1}')
-USERS=$(who | wc -l)
-PROCS=$(ps -e --no-headers | wc -l)
+backup_existing_config() {
+    log "💾 Creating rollback backup: $BACKUP_DIR"
+    mkdir -p "$BACKUP_DIR"
 
-echo ""
+    backup_file /etc/motd
+    backup_file /run/motd
+    backup_file /run/motd.dynamic
+    backup_file /etc/default/motd-news
+    backup_file /etc/pam.d/sshd
+    backup_file /etc/pam.d/login
+    backup_file /etc/pam.d/common-session
+    backup_file /etc/pam.d/common-session-noninteractive
+    backup_file "$MOTD_SCRIPT"
+    backup_file "$PAM_SNIPPET"
 
-\# ===== LOGO =====
-echo -e "${MAGENTA}"
-cat << "LOGO"
-██████╗░░██████╗░███╗░░██╗░█████╗░██████╗░███████╗░██████╗™
-██╔══██╗██╔════╝░████╗░██║██╔══██╗██╔══██╗██╔════╝██╔════╝
-██████╔╝██║░░██╗░██╔██╗██║██║░░██║██║░░██║█████╗░░╚█████╗░
-██╔══██╗██║░░╚██╗██║╚████║██║░░██║██║░░██║██╔══╝░░░╚═══██╗
-██║░░██║╚██████╔╝██║░╚███║╚█████╔╝██████╔╝███████╗██████╔╝
-╚═╝░░╚═╝░╚═════╝░╚═╝░░╚══╝░╚════╝░╚═════╝░╚══════╝╚═════╝░
-LOGO
-echo -e "${RESET}"
-
-\# ===== HEADER =====
-echo -e "${GREEN}🚀 Welcome to RGNODES™ Datacenter${RESET}"
-echo -e "${BLUE}High Performance • Secure • Reliable Infrastructure${RESET}"
-echo -e "${GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-\# ===== STATS =====
-printf "${CYAN}%-18s${RESET} %s\n" "Hostname:" "$HOSTNAME"
-printf "${CYAN}%-18s${RESET} %s\n" "OS:" "$OS"
-printf "${CYAN}%-18s${RESET} %s\n" "Kernel:" "$KERNEL"
-printf "${CYAN}%-18s${RESET} %s\n" "Uptime:" "$UPTIME"
-printf "${CYAN}%-18s${RESET} %s\n" "CPU Usage:" "$CPU"
-printf "${CYAN}%-18s${RESET} %sMB / %sMB (${YELLOW}%s%%${RESET})\n" "Memory:" "$MEM_USED" "$MEM_TOTAL" "$MEM_PERC"
-printf "${CYAN}%-18s${RESET} %s\n" "Disk:" "$DISK"
-printf "${CYAN}%-18s${RESET} %s\n" "Processes:" "$PROCS"
-printf "${CYAN}%-18s${RESET} %s\n" "Users:" "$USERS"
-printf "${CYAN}%-18s${RESET} %s\n" "IP:" "$IP"
-
-echo -e "${GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-\# ===== FOOTER =====
-echo -e "${GREEN}Support:${RESET}  support\@rgnodes.cloud"
-echo -e "${GREEN}Discord:${RESET}  [https://discord.gg/wJ5D5MHkUA](https://discord.gg/wJ5D5MHkUA)"
-echo -e "${GREEN}Website:${RESET}  [https://www.rgnodes.qzz.io/](https://www.rgnodes.qzz.io/)"
-echo -e "${MAGENTA}RGNODES™ — Free Hosting 💎${RESET}"
-echo ""
+    cat > "$STATE_DIR/last-backup" <<EOF
+$BACKUP_DIR
 EOF
+    chmod 600 "$STATE_DIR/last-backup"
+}
 
-chmod +x /etc/update-motd.d/00-rgnodes
+disable_motd_update_scripts() {
+    local dir="/etc/update-motd.d"
+    [[ -d "$dir" ]] || return 0
 
-\# ================================
-\# RESTART SERVICES
-\# ================================
-systemctl restart ssh 2>/dev/null || true
+    log "🧹 Disabling all distro-provided dynamic MOTD scripts..."
+    while IFS= read -r -d '' file; do
+        case "$file" in
+            "$MOTD_SCRIPT") continue ;;
+        esac
+        chmod a-x "$file" 2>/dev/null || true
+    done < <(find "$dir" -maxdepth 1 -type f -print0 2>/dev/null)
+}
 
-echo ""
-echo "✅ RGNODES™ MOTD Installed (ONLY MODE ENABLED)"
-echo "🚫 All default MOTD fully removed"
-echo "🔥 Only your custom MOTD will show"
-echo "➡ Reconnect SSH to see changes"
+disable_motd_news() {
+    if [[ -f /etc/default/motd-news ]]; then
+        log "📰 Disabling motd-news..."
+        sed -i -E 's/^[[:space:]]*ENABLED=.*/ENABLED=0/' /etc/default/motd-news || true
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        for unit in motd-news.timer motd-news.service; do
+            if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+                systemctl disable --now "$unit" >/dev/null 2>&1 || true
+            fi
+        done
+    fi
+}
+
+remove_old_rgnodes_pam_lines() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+
+    # Remove older RGNODES/Atyro/legacy pam_exec MOTD lines.
+    sed -i \
+        -e '\|pam_exec\.so.*update-motd\.d/00-\(rgnodes\|atyrocloud\|raincloud\)|d' \
+        -e '/# RGNODES-MOTD-INCLUDE/d' \
+        -e '/^[[:space:]]*@include[[:space:]]\+rgnodes-motd[[:space:]]*$/d' \
+        "$file" || true
+
+    # Remove standard pam_motd entries from login/session stacks we control.
+    sed -i '\|pam_motd\.so|d' "$file" || true
+}
+
+install_pam_snippet() {
+    log "🔐 Installing isolated PAM MOTD handler..."
+
+    mkdir -p /etc/pam.d
+    cat > "$PAM_SNIPPET" <<EOF
+# RGNODES™ MOTD PAM integration
+# Generated by RGNODES-MOTD-Installer v$SCRIPT_VERSION
+session optional pam_exec.so type=open_session stdout quiet $MOTD_SCRIPT
+EOF
+    chown root:root "$PAM_SNIPPET"
+    chmod 0644 "$PAM_SNIPPET"
+}
+
+add_pam_include() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+
+    remove_old_rgnodes_pam_lines "$file"
+
+    printf '\n%s\n@include rgnodes-motd\n' "$PAM_MARKER" >> "$file"
+}
+
+create_motd_script() {
+    log "✨ Installing RGNODES™ dynamic MOTD..."
+
+    mkdir -p /etc/update-motd.d
+    cat > "$MOTD_SCRIPT" <<'MOTDEOF'
+#!/usr/bin/env bash
+# RGNODES™ Dynamic MOTD
+# Intentionally read-only: it only gathers system information and prints it.
+
+set -u
+export LC_ALL=C
+
+# Never print MOTD into non-interactive SSH channels (scp/sftp/ssh command mode).
+if [[ ! -t 1 ]]; then
+    exit 0
+fi
+
+if [[ "${PAM_TYPE:-open_session}" != "open_session" ]]; then
+    exit 0
+fi
+
+ESC="$(printf '\033')"
+GREEN="${ESC}[38;5;82m"
+CYAN="${ESC}[38;5;51m"
+BLUE="${ESC}[38;5;39m"
+MAGENTA="${ESC}[38;5;213m"
+YELLOW="${ESC}[38;5;220m"
+GRAY="${ESC}[38;5;245m"
+RESET="${ESC}[0m"
+
+safe_value() {
+    local value="${1:-N/A}"
+    [[ -n "$value" ]] && printf '%s' "$value" || printf 'N/A'
+}
+
+HOSTNAME_VALUE="$(hostname 2>/dev/null || printf 'N/A')"
+
+OS_VALUE="N/A"
+if [[ -r /etc/os-release ]]; then
+    . /etc/os-release
+    OS_VALUE="${PRETTY_NAME:-${NAME:-N/A}}"
+fi
+
+KERNEL_VALUE="$(uname -r 2>/dev/null || printf 'N/A')"
+UPTIME_VALUE="$(uptime -p 2>/dev/null | sed 's/^up[[:space:]]*//' || true)"
+[[ -n "$UPTIME_VALUE" ]] || UPTIME_VALUE="N/A"
+
+# Reliable CPU percentage using /proc/stat deltas instead of parsing top output.
+CPU_VALUE="N/A"
+if [[ -r /proc/stat ]]; then
+    read -r TOTAL_A IDLE_A < <(
+        awk '/^cpu / {
+            total=$2+$3+$4+$5+$6+$7+$8+$9+$10;
+            idle=$5+$6;
+            print total, idle;
+            exit
+        }' /proc/stat
+    ) || true
+
+    sleep 0.15
+
+    read -r TOTAL_B IDLE_B < <(
+        awk '/^cpu / {
+            total=$2+$3+$4+$5+$6+$7+$8+$9+$10;
+            idle=$5+$6;
+            print total, idle;
+            exit
+        }' /proc/stat
+    ) || true
+
+    if [[ "${TOTAL_A:-0}" =~ ^[0-9]+$ &&
+          "${TOTAL_B:-0}" =~ ^[0-9]+$ &&
+          "${IDLE_A:-0}" =~ ^[0-9]+$ &&
+          "${IDLE_B:-0}" =~ ^[0-9]+$ ]]; then
+        TOTAL_DELTA=$((TOTAL_B - TOTAL_A))
+        IDLE_DELTA=$((IDLE_B - IDLE_A))
+        if (( TOTAL_DELTA > 0 )); then
+            CPU_VALUE="$(awk -v t="$TOTAL_DELTA" -v i="$IDLE_DELTA" \
+                'BEGIN { printf "%.1f%%", ((t-i)*100/t) }')"
+        fi
+    fi
+fi
+
+MEM_USED_MB="N/A"
+MEM_TOTAL_MB="N/A"
+MEM_PERC="N/A"
+if [[ -r /proc/meminfo ]]; then
+    read -r MEM_USED_KB MEM_TOTAL_KB MEM_PERC_RAW < <(
+        awk '
+            /MemTotal:/     { total=$2 }
+            /MemAvailable:/ { avail=$2 }
+            END {
+                if (total > 0) {
+                    used=total-avail;
+                    printf "%.0f %.0f %.1f", used, total, used*100/total
+                }
+            }
+        ' /proc/meminfo
+    ) || true
+
+    if [[ "${MEM_TOTAL_KB:-0}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        MEM_USED_MB="$(awk -v v="${MEM_USED_KB:-0}" 'BEGIN {printf "%.0f", v/1024}')"
+        MEM_TOTAL_MB="$(awk -v v="${MEM_TOTAL_KB:-0}" 'BEGIN {printf "%.0f", v/1024}')"
+        MEM_PERC="$MEM_PERC_RAW"
+    fi
+fi
+
+DISK_VALUE="N/A"
+if command -v df >/dev/null 2>&1; then
+    DISK_VALUE="$(df -P -h / 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')"
+    [[ -n "$DISK_VALUE" ]] || DISK_VALUE="N/A"
+fi
+
+IP_VALUE="N/A"
+if command -v ip >/dev/null 2>&1; then
+    IP_VALUE="$(ip -4 route get 1.1.1.1 2>/dev/null |
+        awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+fi
+if [[ -z "$IP_VALUE" ]]; then
+    IP_VALUE="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+[[ -n "$IP_VALUE" ]] || IP_VALUE="N/A"
+
+LOAD_VALUE="N/A"
+if [[ -r /proc/loadavg ]]; then
+    LOAD_VALUE="$(awk '{print $1 " " $2 " " $3}' /proc/loadavg)"
+fi
+
+USERS_VALUE="0"
+if command -v who >/dev/null 2>&1; then
+    USERS_VALUE="$(who 2>/dev/null | wc -l | tr -d ' ')"
+fi
+
+PROCS_VALUE="N/A"
+if command -v ps >/dev/null 2>&1; then
+    PROCS_VALUE="$(ps -e --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+fi
+
+echo
+printf '%b\n' "$MAGENTA"
+cat <<'LOGO'
+██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗™
+██╔══██╗██╔════╝ ████╗  ██║██╔══██╗██╔══██╗██╔════╝██╔════╝
+██████╔╝██║  ██╗ ██╔██╗ ██║██║  ██║██║  ██║█████╗  ╚█████╗
+██╔══██╗██║  ╚██╗██║╚██╗██║██║  ██║██║  ██║██╔══╝  ╚═══██╗
+██║  ██║╚██████╔╝██║ ╚████║╚█████╔╝██████╔╝███████╗██████╔╝
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚══╝ ╚════╝ ╚═════╝ ╚══════╝╚═════╝
+LOGO
+printf '%b\n' "$RESET"
+
+printf '%b\n' "${GREEN}🚀 Welcome to RGNODES™ Datacenter${RESET}"
+printf '%b\n' "${BLUE}High Performance • Secure • Reliable Infrastructure${RESET}"
+printf '%b\n' "${GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+printf '%b%-18s%b %s\n' "$CYAN" "Hostname:" "$RESET" "$(safe_value "$HOSTNAME_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "OS:" "$RESET" "$(safe_value "$OS_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "Kernel:" "$RESET" "$(safe_value "$KERNEL_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "Uptime:" "$RESET" "$(safe_value "$UPTIME_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "CPU Usage:" "$RESET" "$(safe_value "$CPU_VALUE")"
+printf '%b%-18s%b %sMB / %sMB (%b%s%%%b)\n' \
+    "$CYAN" "Memory:" "$RESET" "$MEM_USED_MB" "$MEM_TOTAL_MB" "$YELLOW" "$MEM_PERC" "$RESET"
+printf '%b%-18s%b %s\n' "$CYAN" "Disk:" "$RESET" "$(safe_value "$DISK_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "Load Average:" "$RESET" "$(safe_value "$LOAD_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "Processes:" "$RESET" "$(safe_value "$PROCS_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "Users:" "$RESET" "$(safe_value "$USERS_VALUE")"
+printf '%b%-18s%b %s\n' "$CYAN" "IPv4:" "$RESET" "$(safe_value "$IP_VALUE")"
+
+printf '%b\n' "${GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+printf '%bSupport:%b  support@rgnodes.cloud\n' "$GREEN" "$RESET"
+printf '%bDiscord:%b  https://discord.gg/wJ5D5MHkUA\n' "$GREEN" "$RESET"
+printf '%bWebsite:%b  https://www.rgnodes.qzz.io/\n' "$GREEN" "$RESET"
+printf '%b\n' "${MAGENTA}RGNODES™ — Free Hosting 💎${RESET}"
+echo
+exit 0
+MOTDEOF
+
+    chown root:root "$MOTD_SCRIPT"
+    chmod 0755 "$MOTD_SCRIPT"
+}
+
+clean_legacy_motd_files() {
+    log "🧽 Cleaning legacy generated MOTD files..."
+
+    rm -f /etc/motd /var/run/motd /run/motd.dynamic 2>/dev/null || true
+
+    # Keep directories intact because packages own them; simply disable their scripts.
+    if [[ -d /etc/update-motd.d ]]; then
+        while IFS= read -r -d '' file; do
+            [[ "$file" == "$MOTD_SCRIPT" ]] && continue
+            chmod a-x "$file" 2>/dev/null || true
+        done < <(find /etc/update-motd.d -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+}
+
+detect_ssh_service() {
+    SSH_SERVICE=""
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl list-unit-files ssh.service >/dev/null 2>&1; then
+            SSH_SERVICE="ssh"
+        elif systemctl list-unit-files sshd.service >/dev/null 2>&1; then
+            SSH_SERVICE="sshd"
+        fi
+    fi
+}
+
+validate_ssh() {
+    if command -v sshd >/dev/null 2>&1; then
+        log "🔎 Validating sshd configuration..."
+        sshd -t || die "sshd configuration test failed. SSH was NOT reloaded."
+    fi
+}
+
+reload_ssh() {
+    detect_ssh_service
+    if [[ -n "$SSH_SERVICE" ]] && command -v systemctl >/dev/null 2>&1; then
+        log "🔄 Reloading SSH safely..."
+        systemctl reload "$SSH_SERVICE" >/dev/null 2>&1 ||
+            systemctl restart "$SSH_SERVICE" >/dev/null 2>&1 ||
+            log "⚠️ Could not reload SSH automatically. Reconnect/service restart manually."
+    elif command -v service >/dev/null 2>&1; then
+        service ssh reload >/dev/null 2>&1 ||
+            service ssh restart >/dev/null 2>&1 ||
+            true
+    else
+        log "⚠️ SSH service manager not detected; MOTD files are installed."
+    fi
+}
+
+write_restore_helper() {
+    cat > /usr/local/sbin/rgnodes-motd-restore <<'RESTOREEOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+STATE_FILE="/var/lib/rgnodes-motd/last-backup"
+[[ $EUID -eq 0 ]] || { echo "Run as root."; exit 1; }
+[[ -f "$STATE_FILE" ]] || { echo "No RGNODES™ MOTD backup recorded."; exit 1; }
+
+BACKUP_DIR="$(cat "$STATE_FILE")"
+[[ -d "$BACKUP_DIR" ]] || { echo "Backup directory not found: $BACKUP_DIR"; exit 1; }
+
+restore_one() {
+    local path="$1"
+    local backup="$BACKUP_DIR$path"
+    if [[ -e "$backup" || -L "$backup" ]]; then
+        mkdir -p "$(dirname "$path")"
+        rm -f "$path"
+        cp -a "$backup" "$path"
+        echo "Restored $path"
+    fi
+}
+
+restore_one /etc/motd
+restore_one /run/motd
+restore_one /run/motd.dynamic
+restore_one /etc/default/motd-news
+restore_one /etc/pam.d/sshd
+restore_one /etc/pam.d/login
+restore_one /etc/pam.d/common-session
+restore_one /etc/pam.d/common-session-noninteractive
+restore_one /etc/update-motd.d/00-rgnodes
+restore_one /etc/pam.d/rgnodes-motd
+
+echo "Restoration complete. Validate SSH before reconnecting."
+command -v sshd >/dev/null 2>&1 && sshd -t
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+fi
+RESTOREEOF
+    chown root:root /usr/local/sbin/rgnodes-motd-restore
+    chmod 0755 /usr/local/sbin/rgnodes-motd-restore
+}
+
+verify_install() {
+    log "🧪 Running final verification..."
+
+    [[ -x "$MOTD_SCRIPT" ]] || die "MOTD script missing or not executable."
+    [[ -f "$PAM_SNIPPET" ]] || die "PAM snippet missing."
+
+    bash -n "$MOTD_SCRIPT" || die "MOTD script syntax check failed."
+
+    for f in /etc/pam.d/sshd /etc/pam.d/login; do
+        if [[ -f "$f" ]]; then
+            grep -Fq '@include rgnodes-motd' "$f" ||
+                die "PAM include missing from $f"
+        fi
+    done
+
+    # Verify no legacy RGNODES/Atyro pam_exec entries remain.
+    if grep -RqsE 'pam_exec\.so.*update-motd\.d/00-(rgnodes|atyrocloud|raincloud)' \
+        /etc/pam.d/sshd /etc/pam.d/login /etc/pam.d/common-session /etc/pam.d/common-session-noninteractive 2>/dev/null; then
+        die "Legacy MOTD PAM entry still exists."
+    fi
+
+    log "✅ Static verification passed."
+}
+
+print_status() {
+    echo "RGNODES™ MOTD v$SCRIPT_VERSION"
+    echo "OS: ${OS_NAME:-unknown}"
+    echo "MOTD: $MOTD_SCRIPT"
+    echo "PAM: $PAM_SNIPPET"
+    echo "Backup: ${BACKUP_DIR:-$(cat "$STATE_DIR/last-backup" 2>/dev/null || echo N/A)}"
+    if [[ -x "$MOTD_SCRIPT" ]]; then
+        echo "Status: INSTALLED"
+    else
+        echo "Status: NOT INSTALLED"
+    fi
+}
+
+install() {
+    require_root
+    detect_os
+    mkdir -p "$STATE_DIR" "$BACKUP_ROOT"
+    touch "$LOG_FILE"
+    chmod 600 "$LOG_FILE"
+
+    make_backup_dir
+    backup_existing_config
+
+    log "🔧 Installing RGNODES™ MOTD v$SCRIPT_VERSION on $OS_NAME..."
+    disable_motd_update_scripts
+    disable_motd_news
+    clean_legacy_motd_files
+
+    # Build the isolated PAM snippet first.
+    install_pam_snippet
+
+    # Remove legacy/default entries from relevant PAM stacks.
+    for file in \
+        /etc/pam.d/sshd \
+        /etc/pam.d/login \
+        /etc/pam.d/common-session \
+        /etc/pam.d/common-session-noninteractive; do
+        remove_old_rgnodes_pam_lines "$file"
+    done
+
+    # Attach custom MOTD exactly once to SSH and console login.
+    add_pam_include /etc/pam.d/sshd
+    add_pam_include /etc/pam.d/login
+
+    create_motd_script
+    write_restore_helper
+
+    validate_ssh
+    verify_install
+    reload_ssh
+
+    log "✅ RGNODES™ MOTD installed successfully."
+    log "📌 Backup: $BACKUP_DIR"
+    log "➡️ Reconnect SSH to see the new MOTD."
+    log "🛟 Emergency restore: /usr/local/sbin/rgnodes-motd-restore"
+}
+
+uninstall() {
+    require_root
+    detect_os
+    mkdir -p "$STATE_DIR"
+
+    log "🧹 Removing RGNODES™ MOTD integration..."
+
+    for file in \
+        /etc/pam.d/sshd \
+        /etc/pam.d/login \
+        /etc/pam.d/common-session \
+        /etc/pam.d/common-session-noninteractive; do
+        if [[ -f "$file" ]]; then
+            sed -i \
+                -e '/# RGNODES-MOTD-INCLUDE/d' \
+                -e '/^[[:space:]]*@include[[:space:]]\+rgnodes-motd[[:space:]]*$/d' \
+                "$file"
+        fi
+    done
+
+    rm -f "$PAM_SNIPPET" "$MOTD_SCRIPT" /usr/local/sbin/rgnodes-motd-restore
+
+    if [[ -f "$STATE_DIR/last-backup" ]]; then
+        BACKUP_DIR="$(cat "$STATE_DIR/last-backup")"
+        if [[ -d "$BACKUP_DIR" ]]; then
+            for file in \
+                /etc/motd \
+                /run/motd \
+                /run/motd.dynamic \
+                /etc/default/motd-news \
+                /etc/pam.d/sshd \
+                /etc/pam.d/login \
+                /etc/pam.d/common-session \
+                /etc/pam.d/common-session-noninteractive \
+                /etc/update-motd.d/00-rgnodes; do
+                restore_file_from_backup "$file"
+            done
+        fi
+    fi
+
+    # Re-enable previously executable update-motd scripts.
+    if [[ -d /etc/update-motd.d ]]; then
+        while IFS= read -r -d '' file; do
+            chmod a+x "$file" 2>/dev/null || true
+        done < <(find /etc/update-motd.d -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+
+    validate_ssh
+    reload_ssh
+    log "✅ RGNODES™ MOTD removed/restored."
+}
+
+case "${1:-install}" in
+    install)
+        install
+        ;;
+    uninstall|remove|restore)
+        uninstall
+        ;;
+    status)
+        require_root
+        detect_os
+        print_status
+        ;;
+    *)
+        echo "Usage: $0 {install|uninstall|status}"
+        exit 2
+        ;;
+esac
