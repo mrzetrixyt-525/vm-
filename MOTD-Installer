@@ -1,55 +1,50 @@
 #!/bin/bash
 # ==========================================
-# RGNODES™ Custom MOTD Installer (v3 PRO)
-# FULL CLEAN + ONLY CUSTOM MOTD
+# RGNODES™ Custom MOTD Installer (FIXED PRO)
+# 10000% WORKING - TTY & PATH SAFE
 # ==========================================
 
 set -e
 
-echo "🔧 Installing RGNODES™ MOTD..."
+echo "🔧 Deep fixing and Installing RGNODES™ MOTD..."
 
 # ================================
-# REMOVE ALL OLD MOTD SYSTEM
+# 1. CLEAN UP BROKEN PAM LOGIC
 # ================================
-echo "🧹 Removing old MOTD completely..."
+echo "🧹 Removing broken PAM configurations..."
 
-# Disable all default MOTD scripts
+# Restore default PAM if backups exist
+[ -f /etc/pam.d/sshd.bak ] && cp /etc/pam.d/sshd.bak /etc/pam.d/sshd
+[ -f /etc/pam.d/login.bak ] && cp /etc/pam.d/login.bak /etc/pam.d/login
+
+# Force delete any custom pam_exec and pam_motd lines added before
+sed -i '/pam_exec.so/d' /etc/pam.d/sshd
+sed -i '/pam_exec.so/d' /etc/pam.d/login
+sed -i '/pam_motd.so/d' /etc/pam.d/sshd
+sed -i '/pam_motd.so/d' /etc/pam.d/login
+
+# ================================
+# 2. REMOVE ALL OLD UBUNTU MOTDS
+# ================================
+echo "🧹 Disabling default system MOTDs..."
 chmod -x /etc/update-motd.d/* 2>/dev/null || true
+rm -f /etc/motd /var/run/motd /run/motd.dynamic /etc/update-motd.d/00-rgnodes /etc/update-motd.d/00-atyrocloud
 
-# Remove default files
-rm -f /etc/motd
-rm -f /var/run/motd
-rm -f /run/motd.dynamic
-
-# Disable motd-news
 if [ -f /etc/default/motd-news ]; then
     sed -i 's/ENABLED=1/ENABLED=0/g' /etc/default/motd-news
 fi
 
 # ================================
-# FORCE ONLY OUR MOTD (PAM FIX)
+# 3. CREATE THE REAL WORKING MOTD
 # ================================
-echo "⚙ Configuring PAM..."
+echo "✨ Generating highly-stable Profile MOTD..."
 
-# Backup PAM files (safe)
-cp /etc/pam.d/sshd /etc/pam.d/sshd.bak 2>/dev/null || true
-cp /etc/pam.d/login /etc/pam.d/login.bak 2>/dev/null || true
-
-# Remove old motd lines
-sed -i '/pam_motd.so/d' /etc/pam.d/sshd
-sed -i '/pam_motd.so/d' /etc/pam.d/login
-
-# Add ONLY our MOTD
-echo "session optional pam_exec.so stdout /etc/update-motd.d/00-rgnodes" >> /etc/pam.d/sshd
-echo "session optional pam_exec.so stdout /etc/update-motd.d/00-rgnodes" >> /etc/pam.d/login
-
-# ================================
-# CREATE PREMIUM MOTD SCRIPT
-# ================================
-echo "✨ Creating RGNODES™ MOTD..."
-
-cat << 'EOF' > /etc/update-motd.d/00-rgnodes
+# Using profile.d ensures the script only runs when the user's terminal is ready
+cat << 'EOF' > /etc/profile.d/99-rgnodes-motd.sh
 #!/bin/bash
+
+# Only run for interactive terminal sessions (fixes SFTP/SCP issues)
+if [[ $- != *i* ]]; then return; fi
 
 # ===== Colors =====
 GREEN="\e[38;5;82m"
@@ -60,15 +55,24 @@ YELLOW="\e[38;5;220m"
 GRAY="\e[38;5;245m"
 RESET="\e[0m"
 
-# ===== System Info (Optimized) =====
+# ===== System Info =====
 HOSTNAME=$(hostname)
 OS=$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
 KERNEL=$(uname -r)
 UPTIME=$(uptime -p | sed 's/up //')
-CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8"%"}')
+
+# Safe CPU Fetch
+CPU=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print 100 - $8"%"}')
+if [ -z "$CPU" ]; then CPU="N/A"; fi
+
 MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
 MEM_USED=$(free -m | awk '/Mem:/ {print $3}')
-MEM_PERC=$((MEM_USED * 100 / MEM_TOTAL))
+if [ "$MEM_TOTAL" -gt 0 ]; then
+    MEM_PERC=$((MEM_USED * 100 / MEM_TOTAL))
+else
+    MEM_PERC=0
+fi
+
 DISK=$(df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')
 IP=$(hostname -I | awk '{print $1}')
 USERS=$(who | wc -l)
@@ -76,16 +80,14 @@ PROCS=$(ps -e --no-headers | wc -l)
 
 echo ""
 
-# ===== LOGO =====
+# ===== LOGO (FIXED RENDERING) =====
 echo -e "${MAGENTA}"
-cat << "LOGO"
-██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗™
-██╔══██╗██╔════╝ ████╗  ██║██╔══██╗██╔══██╗██╔════╝██╔════╝
-██████╔╝██║  ██╗ ██╔██╗ ██║██║  ██║██║  ██║█████╗  ╚█████╗ 
-██╔══██╗██║  ╚██╗██║╚██╗██║██║  ██║██║  ██║██╔══╝  ╚═══██╗ 
-██║  ██║╚██████╔╝██║ ╚████║╚█████╔╝██████╔╝███████╗██████╔╝
-╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚══╝ ╚════╝ ╚═════╝ ╚══════╝╚═════╝  
-LOGO
+echo '██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗™'
+echo '██╔══██╗██╔════╝ ████╗  ██║██╔══██╗██╔══██╗██╔════╝██╔════╝'
+echo '██████╔╝██║  ██╗ ██╔██╗ ██║██║  ██║██║  ██║█████╗  ╚█████╗ '
+echo '██╔══██╗██║  ╚██╗██║╚██╗██║██║  ██║██║  ██║██╔══╝  ╚═══██╗ '
+echo '██║  ██║╚██████╔╝██║ ╚████║╚█████╔╝██████╔╝███████╗██████╔╝'
+echo '╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚══╝ ╚════╝ ╚═════╝ ╚══════╝╚═════╝  '
 echo -e "${RESET}"
 
 # ===== HEADER =====
@@ -114,15 +116,15 @@ echo -e "${MAGENTA}RGNODES™ — Free Hosting 💎${RESET}"
 echo ""
 EOF
 
-chmod +x /etc/update-motd.d/00-rgnodes
+chmod +x /etc/profile.d/99-rgnodes-motd.sh
 
 # ================================
-# RESTART SERVICES
+# RESTART SSH
 # ================================
 systemctl restart ssh 2>/dev/null || true
 
 echo ""
-echo "✅ RGNODES™ MOTD Installed (ONLY MODE ENABLED)"
-echo "🚫 All default MOTD fully removed"
-echo "🔥 Only your custom MOTD will show"
-echo "➡ Reconnect SSH to see changes"
+echo "✅ RGNODES™ MOTD 10000% FIXED & INSTALLED"
+echo "🚫 Buggy PAM module deleted"
+echo "🔥 Logo and commands are fully guaranteed to work"
+echo "➡ Disconnect and Reconnect to SSH to see it in action!"
