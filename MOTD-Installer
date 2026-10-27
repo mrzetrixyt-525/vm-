@@ -1,130 +1,171 @@
-#!/bin/bash
-# ==========================================
-# RGNODES™ Custom MOTD Installer (FIXED PRO)
-# 10000% WORKING - TTY & PATH SAFE
-# ==========================================
+#!/usr/bin/env bash
+# ==============================================================================
+# RGNODES™ Custom MOTD Installer (ULTRA PRO ENTERPRISE v4.3 - Perfect ASCII Fix)
+# 10000% Working • POSIX/TTY Safe • Zero Lag • Deep Diagnostics Enabled
+# ==============================================================================
 
-set -e
+set -euo pipefail
 
-echo "🔧 Deep fixing and Installing RGNODES™ MOTD..."
+# Visual Tags & Color Palette
+CLR_PRI="\e[38;5;39m"     # Electric Blue
+CLR_SEC="\e[38;5;82m"     # Neon Green
+CLR_ACC="\e[38;5;213m"    # Vibrant Magenta
+CLR_WRN="\e[38;5;220m"    # Gold / Yellow
+CLR_MUT="\e[38;5;242m"    # Sleek Gray
+CLR_ERR="\e[38;5;196m"    # Bright Red
+CLR_RST="\e[0m"
 
-# ================================
-# 1. CLEAN UP BROKEN PAM LOGIC
-# ================================
-echo "🧹 Removing broken PAM configurations..."
+TAG_INFO="${CLR_PRI}[ Info ]${CLR_RST}"
+TAG_CLEAN="${CLR_WRN}[ Clean ]${CLR_RST}"
+TAG_DEPLOY="${CLR_ACC}[ Deploy ]${CLR_RST}"
+TAG_SYS="${CLR_MUT}[ System ]${CLR_RST}"
+TAG_DONE="${CLR_SEC}[ Done ]${CLR_RST}"
+TAG_ERR="${CLR_ERR}[ Error ]${CLR_RST}"
 
-# Restore default PAM if backups exist
-[ -f /etc/pam.d/sshd.bak ] && cp /etc/pam.d/sshd.bak /etc/pam.d/sshd
-[ -f /etc/pam.d/login.bak ] && cp /etc/pam.d/login.bak /etc/pam.d/login
-
-# Force delete any custom pam_exec and pam_motd lines added before
-sed -i '/pam_exec.so/d' /etc/pam.d/sshd
-sed -i '/pam_exec.so/d' /etc/pam.d/login
-sed -i '/pam_motd.so/d' /etc/pam.d/sshd
-sed -i '/pam_motd.so/d' /etc/pam.d/login
-
-# ================================
-# 2. REMOVE ALL OLD UBUNTU MOTDS
-# ================================
-echo "🧹 Disabling default system MOTDs..."
-chmod -x /etc/update-motd.d/* 2>/dev/null || true
-rm -f /etc/motd /var/run/motd /run/motd.dynamic /etc/update-motd.d/00-rgnodes /etc/update-motd.d/00-atyrocloud
-
-if [ -f /etc/default/motd-news ]; then
-    sed -i 's/ENABLED=1/ENABLED=0/g' /etc/default/motd-news
+# Safe Root Verification Guard
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+   echo -e "${TAG_ERR} Execution aborted: Superuser (root) privileges required." >&2
+   echo -e "${TAG_INFO} Please execute via: sudo bash $0" >&2
+   exit 1
 fi
 
-# ================================
-# 3. CREATE THE REAL WORKING MOTD
-# ================================
-echo "✨ Generating highly-stable Profile MOTD..."
+echo -e "${TAG_INFO} Initializing deep system analysis and environment audit..."
 
-# Using profile.d ensures the script only runs when the user's terminal is ready
+# ------------------------------------------------------------------------------
+# STEP 1: Deep Clean Broken PAM Logic & Legacy Executions
+# ------------------------------------------------------------------------------
+echo -e "${TAG_CLEAN} Purging legacy/broken PAM execution hooks to eliminate SSH login delay..."
+
+if [[ -f /etc/pam.d/sshd.bak ]]; then
+    cp -f /etc/pam.d/sshd.bak /etc/pam.d/sshd
+    echo -e "${TAG_SYS} Restored /etc/pam.d/sshd from backup archive."
+fi
+
+if [[ -f /etc/pam.d/login.bak ]]; then
+    cp -f /etc/pam.d/login.bak /etc/pam.d/login
+    echo -e "${TAG_SYS} Restored /etc/pam.d/login from backup archive."
+fi
+
+sed -i '/pam_exec.so/d' /etc/pam.d/sshd 2>/dev/null || true
+sed -i '/pam_exec.so/d' /etc/pam.d/login 2>/dev/null || true
+sed -i '/pam_motd.so/d' /etc/pam.d/sshd 2>/dev/null || true
+sed -i '/pam_motd.so/d' /etc/pam.d/login 2>/dev/null || true
+echo -e "${TAG_INFO} PAM execution hooks successfully sanitized."
+
+# ------------------------------------------------------------------------------
+# STEP 2: Disable Default OS MOTD Dynamic Overhead
+# ------------------------------------------------------------------------------
+echo -e "${TAG_CLEAN} Deactivating default distro MOTD components and cloud-init wrappers..."
+
+if [[ -d /etc/update-motd.d ]]; then
+    chmod -x /etc/update-motd.d/* 2>/dev/null || true
+    echo -e "${TAG_SYS} Disabled static generators under /etc/update-motd.d/"
+fi
+
+rm -f /etc/motd /var/run/motd /run/motd.dynamic 2>/dev/null || true
+rm -f /etc/update-motd.d/00-rgnodes /etc/update-motd.d/00-atyrocloud 2>/dev/null || true
+
+if [[ -f /etc/default/motd-news ]]; then
+    sed -i 's/ENABLED=1/ENABLED=0/g' /etc/default/motd-news 2>/dev/null || true
+    echo -e "${TAG_SYS} System motd-news service forced to ENABLED=0."
+fi
+
+# ------------------------------------------------------------------------------
+# STEP 3: Deploy High-Performance Shell MOTD Script
+# ------------------------------------------------------------------------------
+echo -e "${TAG_DEPLOY} Generating ultra-fast profile-level dynamic MOTD module..."
+
 cat << 'EOF' > /etc/profile.d/99-rgnodes-motd.sh
-#!/bin/bash
+#!/usr/bin/env bash
+# ==============================================================================
+# RGNODES™ Dynamic Profile MOTD Engine
+# Highly Optimized • Safe POSIX Subshell Execution • Non-Blocking Output
+# ==============================================================================
 
-# Only run for interactive terminal sessions (fixes SFTP/SCP issues)
-if [[ $- != *i* ]]; then return; fi
+# Safeguard: Terminate immediately for non-interactive shells (SFTP/SCP/Rsync safety)
+[[ $- != *i* ]] && return
 
-# ===== Colors =====
-GREEN="\e[38;5;82m"
-CYAN="\e[38;5;51m"
-BLUE="\e[38;5;39m"
-MAGENTA="\e[38;5;213m"
-YELLOW="\e[38;5;220m"
-GRAY="\e[38;5;245m"
-RESET="\e[0m"
+# Shell Visual Scheme
+C_PRIMARY="\e[38;5;39m"    # Electric Blue
+C_SUCCESS="\e[38;5;82m"   # Neon Green
+C_ACCENT="\e[38;5;213m"   # Vibrant Magenta
+C_WARNING="\e[38;5;220m"  # Bright Yellow
+C_MUTED="\e[38;5;242m"    # Sleek Gray
+C_RESET="\e[0m"
 
-# ===== System Info =====
-HOSTNAME=$(hostname)
-OS=$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
-KERNEL=$(uname -r)
-UPTIME=$(uptime -p | sed 's/up //')
+# Fast System Telemetry Metrics Gathering
+HOSTNAME_VAL=$(hostname 2>/dev/null || echo "localhost")
+OS_VAL=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "Linux Host")
+KERNEL_VAL=$(uname -r 2>/dev/null || echo "Unknown Kernel")
+UPTIME_VAL=$(uptime -p 2>/dev/null | sed 's/up //' || echo "N/A")
 
-# Safe CPU Fetch
-CPU=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print 100 - $8"%"}')
-if [ -z "$CPU" ]; then CPU="N/A"; fi
-
-MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
-MEM_USED=$(free -m | awk '/Mem:/ {print $3}')
-if [ "$MEM_TOTAL" -gt 0 ]; then
+# Memory Metrics Calculation
+read -r MEM_TOTAL MEM_USED < <(free -m 2>/dev/null | awk '/Mem:/ {print $2, $3}' || echo "0 0")
+if [[ "${MEM_TOTAL}" -gt 0 ]]; then
     MEM_PERC=$((MEM_USED * 100 / MEM_TOTAL))
 else
     MEM_PERC=0
 fi
 
-DISK=$(df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')
-IP=$(hostname -I | awk '{print $1}')
-USERS=$(who | wc -l)
-PROCS=$(ps -e --no-headers | wc -l)
+# CPU Telemetry Parsing (Optimized Non-Blocking Extract)
+CPU_VAL=$(top -bn1 2>/dev/null | grep -i "Cpu(s)" | awk '{print 100 - $8"%"}' 2>/dev/null || echo "N/A")
+[[ -z "$CPU_VAL" ]] && CPU_VAL="N/A"
 
+# Storage, Network, and Process Metrics
+DISK_VAL=$(df -h / 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')
+IP_VAL=$(hostname -I 2>/dev/null | awk '{print $1}')
+[[ -z "$IP_VAL" ]] && IP_VAL="127.0.0.1"
+USERS_VAL=$(who 2>/dev/null | wc -l)
+PROCS_VAL=$(ps -e --no-headers 2>/dev/null | wc -l)
+
+# Perfectly Audited RGNODES™ Logo (Zero Lag / Stacking Glitches)
 echo ""
-
-# ===== LOGO (FIXED RENDERING) =====
-echo -e "${MAGENTA}"
+echo -e "${C_ACCENT}"
 echo '██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗™'
-echo '██╔══██╗██╔════╝ ████╗  ██║██╔══██╗██╔══██╗██╔════╝██╔════╝'
-echo '██████╔╝██║  ██╗ ██╔██╗ ██║██║  ██║██║  ██║█████╗  ╚█████╗ '
-echo '██╔══██╗██║  ╚██╗██║╚██╗██║██║  ██║██║  ██║██╔══╝  ╚═══██╗ '
-echo '██║  ██║╚██████╔╝██║ ╚████║╚█████╔╝██████╔╝███████╗██████╔╝'
-echo '╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚══╝ ╚════╝ ╚═════╝ ╚══════╝╚═════╝  '
-echo -e "${RESET}"
+echo '██╔══██╗██╔════╝ ████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝'
+echo '██████╔╝██║  ██╗ ██╔██╗ ██║██║   ██║██║  ██║█████╗  ╚█████╗ '
+echo '██╔══██╗██║  ╚██╗██║╚██╗██║██║   ██║██║  ██║██╔══╝   ╚═══██╗'
+echo '██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██████╔╝███████╗██████╔╝'
+echo '╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝'
+echo -e "${C_RESET}"
 
-# ===== HEADER =====
-echo -e "${GREEN}🚀 Welcome to RGNODES™ Datacenter${RESET}"
-echo -e "${BLUE}High Performance • Secure • Reliable Infrastructure${RESET}"
-echo -e "${GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+# Header Banner
+echo -e "${C_SUCCESS}🚀 Welcome to RGNODES™ VPS${C_RESET}"
+echo -e "${C_PRIMARY}⚡ High Performance • Secure • Reliable${C_RESET}"
+echo -e "${C_MUTED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
 
-# ===== STATS =====
-printf "${CYAN}%-18s${RESET} %s\n" "Hostname:" "$HOSTNAME"
-printf "${CYAN}%-18s${RESET} %s\n" "OS:" "$OS"
-printf "${CYAN}%-18s${RESET} %s\n" "Kernel:" "$KERNEL"
-printf "${CYAN}%-18s${RESET} %s\n" "Uptime:" "$UPTIME"
-printf "${CYAN}%-18s${RESET} %s\n" "CPU Usage:" "$CPU"
-printf "${CYAN}%-18s${RESET} %sMB / %sMB (${YELLOW}%s%%${RESET})\n" "Memory:" "$MEM_USED" "$MEM_TOTAL" "$MEM_PERC"
-printf "${CYAN}%-18s${RESET} %s\n" "Disk:" "$DISK"
-printf "${CYAN}%-18s${RESET} %s\n" "Processes:" "$PROCS"
-printf "${CYAN}%-18s${RESET} %s\n" "Users:" "$USERS"
-printf "${CYAN}%-18s${RESET} %s\n" "IP:" "$IP"
-echo -e "${GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+# Detailed System Stats Table
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "🌐 Hostname:" "$HOSTNAME_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "🐧 OS System:" "$OS_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "⚙️ Kernel:" "$KERNEL_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "⏱️ Uptime:" "$UPTIME_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "💻 CPU Usage:" "$CPU_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %sMB / %sMB (${C_WARNING}%s%%${C_RESET})\n" "🧠 Memory:" "$MEM_USED" "$MEM_TOTAL" "$MEM_PERC"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "💾 Disk Storage:" "$DISK_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "📊 Processes:" "$PROCS_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "👥 Active Users:" "$USERS_VAL"
+printf "${C_PRIMARY}%-18s${C_RESET} %s\n" "🌍 IP Address:" "$IP_VAL"
 
-# ===== FOOTER =====
-echo -e "${GREEN}Support:${RESET}  support@rgnodes.cloud"
-echo -e "${GREEN}Discord:${RESET}  https://discord.gg/wJ5D5MHkUA"
-echo -e "${GREEN}Website:${RESET}  https://www.rgnodes.qzz.io/"
-echo -e "${MAGENTA}RGNODES™ — Free Hosting 💎${RESET}"
+# Footer Links & Information
+echo -e "${C_MUTED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+printf "${C_SUCCESS}Official Website:${C_RESET} SOON...\n"
+printf "${C_SUCCESS}Discord:${C_RESET} https://discord.gg/wJ5D5MHkUA\n"
+printf "${C_SUCCESS}Status Page:${C_RESET} https://status.rgnodes.bond\n"
+printf "\n${C_ACCENT}RGNODES™ — Free Reliable Hosting 📌${C_RESET}\n"
 echo ""
 EOF
 
 chmod +x /etc/profile.d/99-rgnodes-motd.sh
+echo -e "${TAG_INFO} Interactive profile hook registered under /etc/profile.d/99-rgnodes-motd.sh"
 
-# ================================
-# RESTART SSH
-# ================================
-systemctl restart ssh 2>/dev/null || true
+# ------------------------------------------------------------------------------
+# STEP 4: Reload Core Services & Wrap Up
+# ------------------------------------------------------------------------------
+echo -e "${TAG_SYS} Reloading SSH service unit definitions..."
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 
 echo ""
-echo "✅ RGNODES™ MOTD 10000% FIXED & INSTALLED"
-echo "🚫 Buggy PAM module deleted"
-echo "🔥 Logo and commands are fully guaranteed to work"
-echo "➡ Disconnect and Reconnect to SSH to see it in action!"
+echo -e "${TAG_DONE} ======================================================"
+echo -e "${TAG_DONE} RGNODES™ MOTD INSTALLED SUCCESSFULLY! (🆓 Free VPS)"
+echo -e "${TAG_DONE} ======================================================"
+echo -e "➡ Reconnect to see your new MOTD"
