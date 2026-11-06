@@ -179,9 +179,7 @@ show_banner() {
 }
 
 exit_anim() {
-    echo -e "${YELLOW}[ Info ] Good Bye Bye.${RESET}"; sleep 0.6
-    echo -e "${YELLOW}[ Info ] Good Bye Bye .${RESET}"; sleep 0.6
-    echo -e "${YELLOW}[ Info ] Good Bye Bye   .${RESET}"; sleep 0.6
+    echo -e "${YELLOW}[ Info ] Good Bye!${RESET}"; sleep 0.6
     exit 0
 }
 
@@ -190,12 +188,12 @@ system_init
 
 while true; do
     show_banner
-    echo -e "${WHITE}[ A ]${RESET} Host Secured Code Snippet ( Cmd.io Style + Password )"
-    echo -e "${WHITE}[ B ]${RESET} Uninstall ( Auto Remove )"
-    echo -e "${WHITE}[ C ]${RESET} Tunnel Status & Logs"
-    echo -e "${WHITE}[ E ]${RESET} Exit"
+    echo -e "${WHITE}[ A ]${RESET} Host Secured Code Snippet (Cmd.io Style + Password Protection)"
+    echo -e "${WHITE}[ B ]${RESET} Uninstall / Clean Up Tunnels & Viewers"
+    echo -e "${WHITE}[ C ]${RESET} View Tunnel Status & Active Links"
+    echo -e "${WHITE}[ E ]${RESET} Exit Application"
     echo -e "${CYAN}========= • =========${RESET}"
-    read -p "Choose: " CHOICE
+    read -p "Choose option [A/B/C/E]: " CHOICE
 
     case "${CHOICE,,}" in
         a)
@@ -204,9 +202,30 @@ while true; do
             echo -e "${BOLD}${GREEN} 🚀 CONFIGURE SECURED CODE SNIPPET ( 1/4 )${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             
-            read -p "Tunnel Name [Default: cf-code-tunnel]: " TUNNEL_NAME
-            TUNNEL_NAME=${TUNNEL_NAME:-cf-code-tunnel}
-            
+            # Exact Configuration Options
+            read -p "PM2 name [Default: cf-code-tunnel]: " PM2_NAME
+            PM2_NAME=${PM2_NAME:-cf-code-tunnel}
+
+            read -p "HTTPS or HTTP [Default: http]: " PROTOCOL
+            PROTOCOL=${PROTOCOL:-http}
+            PROTOCOL_LOWER=$(echo "$PROTOCOL" | tr '[:upper:]' '[:lower:]')
+
+            read -p "cloudflare tunnel port [Default: 3939]: " TUNNEL_PORT
+            TUNNEL_PORT=${TUNNEL_PORT:-3939}
+
+            NOTLS_ARG=""
+            # Condition: Ask NoTLSVerify ONLY if HTTPS is selected
+            if [ "$PROTOCOL_LOWER" = "https" ]; then
+                read -p "NoTLSVerify [ T/F ] [Default: T]: " NOTLS_CHOICE
+                NOTLS_CHOICE=${NOTLS_CHOICE:-T}
+                if [[ "${NOTLS_CHOICE,,}" == "t" ]]; then
+                    NOTLS_ARG="--no-tls-verify"
+                fi
+            fi
+
+            # Built-in fixed secure access password
+            ACCESS_PASS="এটিকে টেক্সট বক্সে পেস্ট করতে ক্লিপে ট্যাপ করুন।"
+
             echo -e "${YELLOW}Enter or Paste the Code/Script you want to share securely:${RESET}"
             echo -e "${CYAN}(Type 'END' on a new line and press Enter when you are finished)${RESET}"
             
@@ -220,28 +239,22 @@ while true; do
                 USER_CODE="#!/bin/bash\necho \"Hello from protected cmd.io style tunnel!\""
             fi
 
-            # Robust portable Base64 encoding for any OS
+            # Securely encode code into Base64
             if base64 --help 2>&1 | grep -q -- "-w"; then
                 ENCODED_CODE=$(echo -n "$USER_CODE" | base64 -w 0)
             else
                 ENCODED_CODE=$(echo -n "$USER_CODE" | base64 | tr -d '\n')
             fi
 
-            DEFAULT_PASS="এটিকে টেক্সট বক্সে পেস্ট করতে ক্লিপে ট্যাপ করুন।"
-            read -p "Set Access Password [Default: ${DEFAULT_PASS}]: " ACCESS_PASS
-            ACCESS_PASS=${ACCESS_PASS:-$DEFAULT_PASS}
+            echo -e "${YELLOW}[ Info ] Creating secure Cmd.io style code viewer on port ${TUNNEL_PORT}...${RESET}"
             
-            echo -e "${YELLOW}[ Info ] Creating secure Cmd.io style code viewer...${RESET}"
-            
-            # Create Node.js Cmd.io Viewer script safely embedding base64 code and password
             cat << EOF > /tmp/cmd_io_viewer.js
 const http = require('http');
 const url = require('url');
 
-const PASSWORD = \`${ACCESS_PASS}\`;
-const PORT = 3939;
-const ENCODED_CONTENT = \`${ENCODED_CODE}\`;
-const SECURE_CODE = Buffer.from(ENCODED_CONTENT, 'base64').toString('utf8');
+const PASSWORD = "${ACCESS_PASS}";
+const PORT = ${TUNNEL_PORT};
+const ENCODED_CONTENT = "${ENCODED_CODE}";
 
 const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url, true);
@@ -249,7 +262,7 @@ const server = http.createServer((req, res) => {
     const isAuthenticated = cookies.includes('auth_granted=true') || parsedUrl.query.pass === PASSWORD;
 
     if (parsedUrl.query.pass === PASSWORD) {
-        res.setHeader('Set-Cookie', 'auth_granted=true; Path=/; HttpOnly');
+        res.setHeader('Set-Cookie', 'auth_granted=true; Path=/; HttpOnly; Max-Age=86400');
         res.writeHead(302, { 'Location': '/' });
         res.end();
         return;
@@ -264,19 +277,20 @@ const server = http.createServer((req, res) => {
                 <meta charset="utf-8">
                 <style>
                     body { background: #0f172a; color: #38bdf8; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .card { background: #1e293b; padding: 35px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.6); text-align: center; border: 1px solid #334155; width: 380px; }
+                    .card { background: #1e293b; padding: 35px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.6); text-align: center; border: 1px solid #334155; width: 420px; }
                     input { width: 100%; padding: 12px; margin: 15px 0; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 6px; box-sizing: border-box; font-size: 13px; }
                     button { background: #22c55e; color: #000; border: none; padding: 12px 20px; font-weight: bold; border-radius: 6px; cursor: pointer; width: 100%; font-size: 14px; }
                     button:hover { background: #16a34a; }
                     h2 { margin-top: 0; color: #f8fafc; }
+                    p { color: #94a3b8; font-size: 13px; }
                 </style>
             </head>
             <body>
                 <div class="card">
                     <h2>🔒 Cmd.io Locked</h2>
-                    <p style="color: #94a3b8; font-size: 13px;">পাসওয়ার্ড দিয়ে কোড এক্সেস করুন</p>
+                    <p>Please enter the access password below to view the code:</p>
                     <form method="GET">
-                        <input type="text" name="pass" placeholder="পাসওয়ার্ড এখানে পেস্ট করুন..." required />
+                        <input type="text" name="pass" placeholder="Paste password here..." required autocomplete="off" />
                         <button type="submit">Unlock Code</button>
                     </form>
                 </div>
@@ -311,7 +325,8 @@ const server = http.createServer((req, res) => {
                 <pre><code id="code-content"></code></pre>
             </div>
             <script>
-                const rawCode = \`\${SECURE_CODE}\`;
+                const encoded = "\${ENCODED_CONTENT}";
+                const rawCode = decodeURIComponent(escape(window.atob(encoded)));
                 document.getElementById('code-content').textContent = rawCode;
 
                 function copyCode() {
@@ -333,7 +348,7 @@ server.listen(PORT, '127.0.0.1', () => {
 EOF
 
             echo -e "\n${CYAN}========= • =========${RESET}"
-            echo -e "${BOLD}${GREEN} ⚙️ INSTALLING PM2 MANAGER ( 2/4 )${RESET}"
+            echo -e "${BOLD}${GREEN} ⚙️ CHECKING PM2 MANAGER ( 2/4 )${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             
             if ! command -v pm2 &> /dev/null; then
@@ -344,12 +359,12 @@ EOF
             fi
 
             echo -e "\n${CYAN}========= • =========${RESET}"
-            echo -e "${BOLD}${GREEN} 🌐 SETUP TUNNEL ( 3/4 )${RESET}"
+            echo -e "${BOLD}${GREEN} 🌐 SETTING UP TUNNEL ( 3/4 )${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             show_progress "Fetching Cloudflare Tunnel Binary"
             
-            pm2 delete "$TUNNEL_NAME" 2>/dev/null
-            pm2 delete "${TUNNEL_NAME}-viewer" 2>/dev/null
+            pm2 delete "$PM2_NAME" 2>/dev/null
+            pm2 delete "${PM2_NAME}-viewer" 2>/dev/null
             killall cloudflared 2>/dev/null
             rm -f /usr/local/bin/cloudflared
             
@@ -364,22 +379,26 @@ EOF
             chmod +x /usr/local/bin/cloudflared
 
             echo -e "\n${CYAN}========= • =========${RESET}"
-            echo -e "${BOLD}${GREEN} 🔄 SETUP 24/7 BACKGROUND ( 4/4 )${RESET}"
+            echo -e "${BOLD}${GREEN} 🔄 STARTING 24/7 BACKGROUND SERVICES ( 4/4 )${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             show_progress "Starting PM2 Service Persistence"
 
-            # Start Secure Code Viewer via PM2 directly pointing to generated file
-            pm2 start /tmp/cmd_io_viewer.js --name "${TUNNEL_NAME}-viewer" > /dev/null 2>&1
+            # Start Secure Code Viewer via PM2
+            pm2 start /tmp/cmd_io_viewer.js --name "${PM2_NAME}-viewer" > /dev/null 2>&1
 
-            # Start Cloudflare Tunnel pointing to local code viewer port 3939
-            pm2 start /usr/local/bin/cloudflared --name "$TUNNEL_NAME" -- tunnel --url http://localhost:3939 --no-tls-verify > /dev/null 2>&1
+            # Start Cloudflare Tunnel
+            if [ -n "$NOTLS_ARG" ]; then
+                pm2 start /usr/local/bin/cloudflared --name "${PM2_NAME}" -- --url ${PROTOCOL}://localhost:${TUNNEL_PORT} ${NOTLS_ARG} > /dev/null 2>&1
+            else
+                pm2 start /usr/local/bin/cloudflared --name "${PM2_NAME}" -- --url ${PROTOCOL}://localhost:${TUNNEL_PORT} > /dev/null 2>&1
+            fi
             pm2 save > /dev/null 2>&1
 
             echo -e "${CYAN}[ Info ] Extracting Cloudflare Tunnel Link...${RESET}"
             TUNNEL_LINK=""
             for i in {1..10}; do
                 sleep 1
-                TUNNEL_LINK=$(pm2 logs "$TUNNEL_NAME" --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
+                TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
                 if [ -n "$TUNNEL_LINK" ]; then
                     break
                 fi
@@ -389,18 +408,21 @@ EOF
             echo -e "${BOLD}${GREEN} ✅ SUCCESSFULLY COMPLETED! ${RESET}"
             echo -e "${GREEN}==========================================${RESET}"
             if [ -n "$TUNNEL_LINK" ]; then
-                echo -e "${WHITE} Link     ====> ${CYAN}${BOLD}${TUNNEL_LINK}${RESET}"
-                echo -e "${WHITE} Password ====> ${GREEN}${BOLD}${ACCESS_PASS}${RESET}"
+                echo -e "${WHITE} PM2 Name     : ${CYAN}${BOLD}${PM2_NAME}${RESET}"
+                echo -e "${WHITE} Protocol     : ${CYAN}${BOLD}${PROTOCOL}${RESET}"
+                echo -e "${WHITE} Tunnel Port  : ${CYAN}${BOLD}${TUNNEL_PORT}${RESET}"
+                echo -e "${WHITE} Link         : ${CYAN}${BOLD}${TUNNEL_LINK}${RESET}"
+                echo -e "${WHITE} Password     : ${GREEN}${BOLD}${ACCESS_PASS}${RESET}"
             else
-                echo -e "${YELLOW}[ Warning ] Take Your Link from Option C${RESET}"
+                echo -e "${YELLOW}[ Warning ] Check Option C for your live link.${RESET}"
             fi
             echo -e "${GREEN}==========================================${RESET}"
-            read -p "Press [ Enter ] To Menu"
+            read -p "Press [ Enter ] to return to menu"
             ;;
         b)
             clear
-            echo -e "${RED}[ Warning ] Removing and Uninstalling Tunnel & Viewer...${RESET}"
-            read -p "Enter Tunnel Name to delete [Default: cf-code-tunnel]: " DEL_NAME
+            echo -e "${RED}[ Warning ] Removing and Uninstalling Tunnels & Viewers...${RESET}"
+            read -p "Enter PM2 Name to delete [Default: cf-code-tunnel]: " DEL_NAME
             DEL_NAME=${DEL_NAME:-cf-code-tunnel}
             pm2 delete "$DEL_NAME" 2>/dev/null
             pm2 delete "${DEL_NAME}-viewer" 2>/dev/null
@@ -409,7 +431,7 @@ EOF
             rm -f /tmp/cmd_io_viewer.js
             pm2 save > /dev/null 2>&1
             echo -e "${GREEN}[ Info ] Successfully Uninstalled and Cleaned Up!${RESET}"
-            read -p "Press [ Enter ] To Menu"
+            read -p "Press [ Enter ] to return to menu"
             ;;
         c)
             clear
@@ -431,7 +453,7 @@ EOF
             exit_anim
             ;;
         *)
-            echo -e "${RED}[ Error ] Invalid Option! Please choose A, B, C or E.${RESET}"
+            echo -e "${RED}[ Error ] Invalid Option! Please choose A, B, C, or E.${RESET}"
             sleep 1.5
             ;;
     esac
