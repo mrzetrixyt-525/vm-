@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
-# Ensure script is run with bash
+# Shell check guard
 if [ -z "$BASH_VERSION" ]; then
-    echo "[-] This script requires Bash. Please run it with: bash $0"
+    echo "[-] Error: This script requires Bash. Run with: bash $0"
     exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Color Palette (High Contrast Cyberpunk)
+# Cyberpunk Palette
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
@@ -19,7 +19,7 @@ MAGENTA='\033[1;35m'
 RESET='\033[0m'
 BOLD='\033[1m'
 
-# 1-100% Real-time Animated Progress Bar
+# 1-100% Real-time Smooth Progress Animation
 show_progress() {
     local task_name="$1"
     local steps=100
@@ -39,47 +39,42 @@ show_progress() {
     echo -e "\n${GREEN}[ Info ] ${task_name} Loaded...${RESET}\n"
 }
 
-# Smart OS Detection & Silent Installation
+# Smart OS Detection & Package Pre-check Logic
 system_init() {
     clear
     echo -e "${CYAN}========= • =========${RESET}"
-    echo -e "${BOLD}${BLUE} 🔍 AUTO OS DETECTION ${RESET}"
+    echo -e "${BOLD}${BLUE} 🔍 AUTO OS DETECTION & SYSTEM CHECK ${RESET}"
     echo -e "${CYAN}========= • =========${RESET}"
 
-    local skip_install=false
+    local skip_install=true
 
     if command -v apt-get &> /dev/null; then
-        local missing=0
         for pkg in curl nodejs npm procps psmisc neofetch; do
-            if ! dpkg -s "$pkg" &> /dev/null; then missing=1; break; fi
+            if ! dpkg -s "$pkg" &> /dev/null; then skip_install=false; break; fi
         done
-        if [ $missing -eq 0 ] && command -v node &> /dev/null && [[ "$(node -v 2>/dev/null)" == v22* ]]; then
-            skip_install=true
+        if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+            skip_install=false
         fi
-
     elif command -v apk &> /dev/null; then
-        local missing=0
         for pkg in curl nodejs npm procps psmisc neofetch bash; do
-            if ! apk info -e "$pkg" &> /dev/null; then missing=1; break; fi
+            if ! apk info -e "$pkg" &> /dev/null; then skip_install=false; break; fi
         done
-        if [ $missing -eq 0 ] && command -v node &> /dev/null && [[ "$(node -v 2>/dev/null)" == v22* ]]; then
-            skip_install=true
+        if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+            skip_install=false
         fi
-
     elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
-        local PKG_MGR="yum"
-        command -v dnf &> /dev/null && PKG_MGR="dnf"
-        local missing=0
         for pkg in curl nodejs npm procps-ng psmisc neofetch; do
-            if ! rpm -q "$pkg" &> /dev/null; then missing=1; break; fi
+            if ! rpm -q "$pkg" &> /dev/null; then skip_install=false; break; fi
         done
-        if [ $missing -eq 0 ] && command -v node &> /dev/null && [[ "$(node -v 2>/dev/null)" == v22* ]]; then
-            skip_install=true
+        if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+            skip_install=false
         fi
+    else
+        skip_install=false
     fi
 
     if [ "$skip_install" = true ]; then
-        echo -e "${GREEN}[ Info ] All required system packages & Node.js 22 are already installed! Skipping installation.${RESET}"
+        echo -e "${GREEN}[ Info ] All required packages & Node.js 22 are already installed. Skipping installation!${RESET}"
         sleep 1
     else
         echo -e "${YELLOW}[ Info ] Missing packages or Node.js 22 detected. Setting up environment...${RESET}"
@@ -119,7 +114,7 @@ system_init() {
             fi
 
         elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
-            PKG_MGR="yum"
+            local PKG_MGR="yum"
             command -v dnf &> /dev/null && PKG_MGR="dnf"
             show_progress "System Repository Update"
             $PKG_MGR update -y > /dev/null 2>&1
@@ -136,11 +131,12 @@ system_init() {
         fi
     fi
 
+    # Neofetch startup view (4-second delay)
     if command -v neofetch &> /dev/null; then
         echo -e "${MAGENTA}"
         neofetch --off
         echo -e "${RESET}"
-        sleep 1
+        sleep 4
     fi
 }
 
@@ -168,7 +164,7 @@ get_sys_info() {
 
     CF_LINK=""
     if command -v pm2 &> /dev/null; then
-        CF_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
+        CF_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com|tcp://[a-zA-Z0-9.-]*:[0-9]*' | tail -n 1)
     fi
 
     if [ -n "$CF_LINK" ]; then
@@ -178,7 +174,7 @@ get_sys_info() {
     fi
 }
 
-# Original Cyberpunk Logo Restored
+# Cyberpunk ASCII Banner
 show_banner() {
     clear
     get_sys_info
@@ -188,7 +184,7 @@ show_banner() {
     echo -e "${BOLD}${BLUE} ██████╔╝██║  ███╗██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗ ${RESET}"
     echo -e "${BOLD}${BLUE} ██╔══██╗██║   ██║██║╚██╗██║██║   ██║██║  ██║██╔══╝  ╚════██║ ${RESET}"
     echo -e "${BOLD}${BLUE} ██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██████╔╝███████╗███████║ ${RESET}"
-    echo -e "${MAGENTA}           Made By 𝐌ɾ. 𝐙ᥱ𝚝𝚛𝐢𝐱                 ${RESET}"
+    echo -e "${MAGENTA}           Made By 𝐌ɾ. 𝐙ᥱ𝚝𝚛𝐢xs                 ${RESET}"
     echo -e "${CYAN}========= • =========${RESET}"
     echo -e "${YELLOW}  Uptime        :${RESET} ${GREEN}${UPTIME_VAL}${RESET}"
     echo -e "${YELLOW}  OS            :${RESET} ${CYAN}${OS_VAL}${RESET}"
@@ -207,8 +203,8 @@ system_init
 
 while true; do
     show_banner
-    echo -e "${WHITE}[ A ]${RESET} Install ( Full Setup )"
-    echo -e "${WHITE}[ B ]${RESET} Uninstall ( Uninstalling )"
+    echo -e "${WHITE}[ A ]${RESET} Install ( HTTP / HTTPS / TCP Setup )"
+    echo -e "${WHITE}[ B ]${RESET} Uninstall ( Remove Tunnel )"
     echo -e "${WHITE}[ C ]${RESET} Tunnel Logs ( Checking Status )"
     echo -e "${WHITE}[ E ]${RESET} Exit"
     echo -e "${CYAN}========= • =========${RESET}"
@@ -218,28 +214,47 @@ while true; do
         a)
             clear
             echo -e "${CYAN}========= • =========${RESET}"
-            echo -e "${BOLD}${GREEN} 🚀 CLOUDFLARE TUNNEL INFO ${RESET}"
+            echo -e "${BOLD}${GREEN} 🚀 CLOUDFLARE TUNNEL SETUP ${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             
             read -p "PM2 name [Default: cf-tunnel]: " PM2_NAME
             PM2_NAME=${PM2_NAME:-cf-tunnel}
 
-            read -p "HTTPS or HTTP [Default: http]: " PROTOCOL
+            read -p "Protocol (http / https / tcp) [Default: http]: " PROTOCOL
             PROTOCOL=${PROTOCOL:-http}
             PROTOCOL_LOWER=$(echo "$PROTOCOL" | tr '[:upper:]' '[:lower:]')
 
-            read -p "Tunnel Port (e.g., 3000) [Default: 3000]: " TUNNEL_PORT
-            TUNNEL_PORT=${TUNNEL_PORT:-3000}
-            
-            # Fixed Port System: Ensures exact port is targeted correctly
-            TUNNEL_TARGET="localhost:$TUNNEL_PORT"
-
             NOTLS_ARG=""
-            if [ "$PROTOCOL_LOWER" = "https" ]; then
-                read -p "NoTLSVerify [ T/F ] [Default: T]: " NOTLS_CHOICE
-                NOTLS_CHOICE=${NOTLS_CHOICE:-T}
-                if [[ "${NOTLS_CHOICE,,}" == "t" ]]; then
-                    NOTLS_ARG="--no-tls-verify"
+            REGION_ARG=""
+            TUNNEL_TARGET=""
+
+            if [ "$PROTOCOL_LOWER" = "tcp" ]; then
+                read -p "Local Port (e.g., 22, 3306, 3000) [Default: 3000]: " LOCAL_PORT
+                LOCAL_PORT=${LOCAL_PORT:-3000}
+                TUNNEL_TARGET="tcp://localhost:$LOCAL_PORT"
+
+                echo -e "${YELLOW}Select Region:${RESET}"
+                echo -e "  [ 1 ] Asia (ap)"
+                echo -e "  [ 2 ] Europe (eur)"
+                read -p "Choose Region [1/2] [Default: 1]: " REG_CHOICE
+                REG_CHOICE=${REG_CHOICE:-1}
+
+                if [ "$REG_CHOICE" = "2" ]; then
+                    REGION_ARG="--region eur"
+                else
+                    REGION_ARG="--region ap"
+                fi
+            else
+                read -p "Tunnel Port (e.g., 3000) [Default: 3000]: " TUNNEL_PORT
+                TUNNEL_PORT=${TUNNEL_PORT:-3000}
+                TUNNEL_TARGET="${PROTOCOL_LOWER}://localhost:${TUNNEL_PORT}"
+
+                if [ "$PROTOCOL_LOWER" = "https" ]; then
+                    read -p "NoTLSVerify [ T/F ] [Default: T]: " NOTLS_CHOICE
+                    NOTLS_CHOICE=${NOTLS_CHOICE:-T}
+                    if [[ "${NOTLS_CHOICE,,}" == "t" ]]; then
+                        NOTLS_ARG="--no-tls-verify"
+                    fi
                 fi
             fi
 
@@ -274,37 +289,70 @@ while true; do
             chmod +x /usr/local/bin/cloudflared
 
             echo -e "\n${CYAN}========= • =========${RESET}"
-            echo -e "${BOLD}${GREEN} 🔄 SETUP 24/7 ${RESET}"
+            echo -e "${BOLD}${GREEN} 🔄 SETUP 24/7 BACKGROUND ${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             show_progress "Starting PM2 Service Persistence"
 
-            if [ -n "$NOTLS_ARG" ]; then
-                pm2 start /usr/local/bin/cloudflared --name "${PM2_NAME}" -- --url ${PROTOCOL}://${TUNNEL_TARGET} ${NOTLS_ARG} > /dev/null 2>&1
-            else
-                pm2 start /usr/local/bin/cloudflared --name "${PM2_NAME}" -- --url ${PROTOCOL}://${TUNNEL_TARGET} > /dev/null 2>&1
-            fi
+            CMD_ARGS="--url ${TUNNEL_TARGET}"
+            [ -n "$NOTLS_ARG" ] && CMD_ARGS="${CMD_ARGS} ${NOTLS_ARG}"
+            [ -n "$REGION_ARG" ] && CMD_ARGS="${CMD_ARGS} ${REGION_ARG}"
+
+            pm2 start /usr/local/bin/cloudflared --name "${PM2_NAME}" -- ${CMD_ARGS} > /dev/null 2>&1
             pm2 save > /dev/null 2>&1
 
-            echo -e "${CYAN}[ Info ] Extracting Cloudflare Tunnel Link...${RESET}"
+            echo -e "${CYAN}[ Info ] Extracting Tunnel Connection Target...${RESET}"
             TUNNEL_LINK=""
-            for i in {1..10}; do
+            for i in {1..15}; do
                 sleep 1
-                TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
+                if [ "$PROTOCOL_LOWER" = "tcp" ]; then
+                    TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -o 'tcp://[a-zA-Z0-9.-]*:[0-9]*' | tail -n 1)
+                else
+                    TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
+                fi
                 if [ -n "$TUNNEL_LINK" ]; then
                     break
                 fi
             done
 
+            # Automatic Multi-Environment Clipboard Copy Logic
+            AUTO_COPIED=""
+            if [ -n "$TUNNEL_LINK" ]; then
+                if command -v termux-clipboard-set &> /dev/null; then
+                    echo -n "$TUNNEL_LINK" | termux-clipboard-set
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
+                elif command -v xclip &> /dev/null; then
+                    echo -n "$TUNNEL_LINK" | xclip -selection clipboard
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
+                elif command -v xsel &> /dev/null; then
+                    echo -n "$TUNNEL_LINK" | xsel --clipboard --input
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
+                elif command -v pbcopy &> /dev/null; then
+                    echo -n "$TUNNEL_LINK" | pbcopy
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
+                fi
+            fi
+
             echo -e "\n${GREEN}==========================================${RESET}"
             echo -e "${BOLD}${GREEN} ✅ SUCCESSFULLY COMPLETED! ${RESET}"
             echo -e "${GREEN}==========================================${RESET}"
-            if [ -n "$TUNNEL_LINK" ]; then
-                echo -e "${WHITE} PM2 Name     : ${CYAN}${BOLD}${PM2_NAME}${RESET}"
-                echo -e "${WHITE} Protocol     : ${CYAN}${BOLD}${PROTOCOL}${RESET}"
-                echo -e "${WHITE} Target Port  : ${CYAN}${BOLD}${TUNNEL_PORT}${RESET}"
-                echo -e "${WHITE} Live Link    : ${CYAN}${BOLD}${TUNNEL_LINK}${RESET}"
+            echo -e "${WHITE} PM2 Name     : ${CYAN}${BOLD}${PM2_NAME}${RESET}"
+            echo -e "${WHITE} Protocol     : ${CYAN}${BOLD}${PROTOCOL_LOWER^^}${RESET}"
+
+            if [ "$PROTOCOL_LOWER" = "tcp" ]; then
+                echo -e "${WHITE} Local Port   : ${CYAN}${BOLD}${LOCAL_PORT}${RESET}"
+                echo -e "${WHITE} TCP Target   : ${CYAN}${BOLD}${TUNNEL_TARGET}${RESET}"
+                if [ -n "$TUNNEL_LINK" ]; then
+                    echo -e "${WHITE} TCP Link     : ${GREEN}${BOLD}${TUNNEL_LINK} ${YELLOW}${AUTO_COPIED}${RESET}"
+                else
+                    echo -e "${YELLOW} TCP Status   : ${GREEN}${BOLD}Active 24/7 on port ${LOCAL_PORT}${RESET}"
+                fi
             else
-                echo -e "${YELLOW}[ Warning ] Check Option C for your live link.${RESET}"
+                echo -e "${WHITE} Target Port  : ${CYAN}${BOLD}${TUNNEL_PORT}${RESET}"
+                if [ -n "$TUNNEL_LINK" ]; then
+                    echo -e "${WHITE} Live Link    : ${CYAN}${BOLD}${TUNNEL_LINK} ${YELLOW}${AUTO_COPIED}${RESET}"
+                else
+                    echo -e "${YELLOW}[ Warning ] Check Option C for your live link.${RESET}"
+                fi
             fi
             echo -e "${GREEN}==========================================${RESET}"
             read -p "Press [ Enter ] to return to menu"
@@ -327,12 +375,12 @@ while true; do
             echo -e "${BOLD}${BLUE} 📊 TUNNEL LOGS ${RESET}"
             echo -e "${CYAN}========= • =========${RESET}"
             pm2 status
-            echo -e "\n${MAGENTA}Active trycloudflare link:${RESET}"
-            ACTIVE_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
+            echo -e "\n${MAGENTA}Active connection / link:${RESET}"
+            ACTIVE_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com|tcp://[a-zA-Z0-9.-]*:[0-9]*' | tail -n 1)
             if [ -n "$ACTIVE_LINK" ]; then
-                echo -e "${WHITE} Link ====> ${CYAN}${BOLD}${ACTIVE_LINK}${RESET}"
+                echo -e "${WHITE} Connection ====> ${CYAN}${BOLD}${ACTIVE_LINK}${RESET}"
             else
-                echo -e "${YELLOW}[ Warning ] No active link found in recent logs.${RESET}"
+                echo -e "${YELLOW}[ Warning ] No active connection found in recent logs.${RESET}"
             fi
             echo -e "${CYAN}==================================${RESET}"
             read -p "Press [ Enter ] anytime to exit"
