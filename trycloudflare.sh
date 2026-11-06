@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Shell safety guard
+# Shell check guard
 if [ -z "$BASH_VERSION" ]; then
     echo "[-] Error: This script requires Bash. Run with: bash $0"
     exit 1
@@ -8,23 +8,28 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Rich Cyberpunk Color Palette (Multi-Color Enhanced)
-R='\033[1;31m'   # Red
-G='\033[1;32m'   # Green
-Y='\033[1;33m'   # Yellow
-B='\033[1;34m'   # Blue
-M='\033[1;35m'   # Magenta
-C='\033[1;36m'   # Cyan
-W='\033[1;37m'   # White
-GR='\033[0;90m'  # Gray
-RES='\033[0m'    # Reset
+# Color Palette (Cyberpunk Theme)
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+CYAN='\033[1;36m'
+WHITE='\033[1;37m'
+MAGENTA='\033[1;35m'
+RESET='\033[0m'
 BOLD='\033[1m'
 
-# High-Detail 1-100% Real-time Animated Progress Bar
+# Helper function for bracket styling: [ Light Pink ] with White text inside
+tag_info() {
+    local text="$1"
+    echo -e "${MAGENTA}[${RESET} ${WHITE}${text}${RESET} ${MAGENTA}]${RESET}"
+}
+
+# 1-100% Real-time Smooth Progress Animation
 show_progress() {
     local task_name="$1"
     local steps=100
-    echo -e "${C}[ ➔ ] Preparing: ${Y}${task_name}${RES}..."
+    echo -e "$(tag_info "Info") Loading: ${task_name}..."
     for ((i=1; i<=steps; i++)); do
         local filled=$((i / 5))
         local empty=$((20 - filled))
@@ -34,13 +39,113 @@ show_progress() {
         for ((j=0; j<filled; j++)); do bar+="█"; done
         for ((j=0; j<empty; j++)); do pad+="░"; done
 
-        printf "\r${C} ⟡ Progress: [${G}%s${GR}%s${C}] ${Y}%3d%%${RES}" "$bar" "$pad" "$i"
-        sleep 0.01
+        printf "\r${CYAN}[${GREEN}%s${WHITE}%s${CYAN}] ${YELLOW}%3d%%${RESET}" "$bar" "$pad" "$i"
+        sleep 0.012
     done
-    echo -e "\n${G} [ ✔ ] ${task_name} Finished Successfully!${RES}\n"
+    echo -e "\n$(tag_info "Info") ${task_name} Loaded...\n"
 }
 
-# System Information Extractor
+# Smart OS Detection & Package Pre-check Logic
+system_init() {
+    clear
+    echo -e "${CYAN}========= • =========${RESET}"
+    echo -e "${BOLD}${BLUE} 🔍 AUTO OS DETECTION & SYSTEM CHECK ${RESET}"
+    echo -e "${CYAN}========= • =========${RESET}"
+
+    local skip_install=true
+
+    if command -v apt-get &> /dev/null; then
+        for pkg in curl nodejs npm procps psmisc neofetch; do
+            if ! dpkg -s "$pkg" &> /dev/null; then skip_install=false; break; fi
+        done
+        if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+            skip_install=false
+        fi
+    elif command -v apk &> /dev/null; then
+        for pkg in curl nodejs npm procps psmisc neofetch bash; do
+            if ! apk info -e "$pkg" &> /dev/null; then skip_install=false; break; fi
+        done
+        if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+            skip_install=false
+        fi
+    elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
+        for pkg in curl nodejs npm procps-ng psmisc neofetch; do
+            if ! rpm -q "$pkg" &> /dev/null; then skip_install=false; break; fi
+        done
+        if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+            skip_install=false
+        fi
+    else
+        skip_install=false
+    fi
+
+    if [ "$skip_install" = true ]; then
+        echo -e "$(tag_info "Info") All required packages & Node.js 22 are already installed. Skipping installation!"
+        sleep 1
+    else
+        echo -e "$(tag_info "Info") Missing packages or Node.js 22 detected. Setting up environment..."
+        
+        if command -v apt-get &> /dev/null; then
+            show_progress "System Repository Update"
+            apt-get update -y > /dev/null 2>&1
+
+            NEEDED_PKGS=()
+            for pkg in curl nodejs npm procps psmisc neofetch; do
+                if ! dpkg -s "$pkg" &> /dev/null; then NEEDED_PKGS+=("$pkg"); fi
+            done
+
+            if [ ${#NEEDED_PKGS[@]} -gt 0 ]; then
+                show_progress "Installing Required Packages"
+                apt-get install -y "${NEEDED_PKGS[@]}" > /dev/null 2>&1
+            fi
+
+            if ! command -v node &> /dev/null || [[ "$(node -v 2>/dev/null)" != v22* ]]; then
+                show_progress "Node.js 22 Environment Setup"
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
+                apt-get install -y nodejs > /dev/null 2>&1
+            fi
+
+        elif command -v apk &> /dev/null; then
+            show_progress "System Repository Update"
+            apk update > /dev/null 2>&1
+
+            NEEDED_PKGS=()
+            for pkg in curl nodejs npm procps psmisc neofetch bash; do
+                if ! apk info -e "$pkg" &> /dev/null; then NEEDED_PKGS+=("$pkg"); fi
+            done
+
+            if [ ${#NEEDED_PKGS[@]} -gt 0 ]; then
+                show_progress "Installing Required Packages"
+                apk add --no-cache "${NEEDED_PKGS[@]}" > /dev/null 2>&1
+            fi
+
+        elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
+            local PKG_MGR="yum"
+            command -v dnf &> /dev/null && PKG_MGR="dnf"
+            show_progress "System Repository Update"
+            $PKG_MGR update -y > /dev/null 2>&1
+
+            NEEDED_PKGS=()
+            for pkg in curl nodejs npm procps-ng psmisc neofetch; do
+                if ! rpm -q "$pkg" &> /dev/null; then NEEDED_PKGS+=("$pkg"); fi
+            done
+
+            if [ ${#NEEDED_PKGS[@]} -gt 0 ]; then
+                show_progress "Installing Required Packages"
+                $PKG_MGR install -y "${NEEDED_PKGS[@]}" > /dev/null 2>&1
+            fi
+        fi
+    fi
+
+    # Neofetch startup view (4-second delay)
+    if command -v neofetch &> /dev/null; then
+        echo -e "${MAGENTA}"
+        neofetch --off
+        echo -e "${RESET}"
+        sleep 4
+    fi
+}
+
 get_sys_info() {
     UPTIME_VAL=$(uptime -p 2>/dev/null | sed 's/up //' || echo "N/A")
     
@@ -58,195 +163,246 @@ get_sys_info() {
     fi
 
     if [ "$PM2_COUNT" -gt 0 ]; then
-        PM2_VAL="${G}${BOLD}Active (${PM2_COUNT} Online)${RES}"
+        PM2_VAL="${GREEN}${BOLD}Active (${PM2_COUNT})${RESET}"
     else
-        PM2_VAL="${R}${BOLD}Offline${RES}"
+        PM2_VAL="${RED}${BOLD}Inactive${RESET}"
     fi
 
-    PINGGY_LINK=""
+    TUNNEL_STATUS_VAL=""
     if command -v pm2 &> /dev/null; then
-        PINGGY_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.pinggy\.(link|io)|tcp://[a-zA-Z0-9.-]*:[0-9]*' | tail -n 1)
+        TUNNEL_STATUS_VAL=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com|tcp://[a-zA-Z0-9.-]*:[0-9]*|https://[a-zA-Z0-9.-]*\.pinggy\.(link|io)' | tail -n 1)
     fi
 
-    if [ -n "$PINGGY_LINK" ]; then
-        PINGGY_STATUS="${G}${BOLD}ONLINE (24/7 Stable)${RES}"
+    if [ -n "$TUNNEL_STATUS_VAL" ]; then
+        TUNNEL_UI_STATUS="${GREEN}${BOLD}Running (24/7 Auto-Recover)${RESET}"
     else
-        PINGGY_STATUS="${R}${BOLD}STOPPED${RES}"
+        TUNNEL_UI_STATUS="${RED}${BOLD}Stopped${RESET}"
     fi
 }
 
-# Rich ASCII Cyberpunk Banner
+# Cyberpunk ASCII Banner
 show_banner() {
     clear
     get_sys_info
-    echo -e "${C}╔════════════════════════════════════════════╗${RES}"
-    echo -e "${B}${BOLD} ██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ${RES}"
-    echo -e "${B}${BOLD} ██╔══██╗██╔════╝ ████╗  ██║██╔═══██╗██╔══██╗${RES}"
-    echo -e "${B}${BOLD} ██████╔╝██║  ███╗██╔██╗ ██║██║   ██║██║  ██║${RES}"
-    echo -e "${B}${BOLD} ██╔══██╗██║   ██║██║╚██╗██║██║   ██║██║  ██║${RES}"
-    echo -e "${B}${BOLD} ██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██████╔╝${RES}"
-    echo -e "${M}           Elite Engine By 𝐌ɾ. 𝐙ᥱ𝚝𝚛𝐢𝐱         ${RES}"
-    echo -e "${C}╠════════════════════════════════════════════╣${RES}"
-    echo -e "${Y}  System Uptime  :${RES} ${G}${UPTIME_VAL}${RES}"
-    echo -e "${Y}  OS Environment :${RES} ${C}${OS_VAL}${RES}"
-    echo -e "${Y}  PM2 Daemon     :${RES} ${PM2_VAL}"
-    echo -e "${Y}  Tunnel Status  :${RES} ${PINGGY_STATUS}"
-    echo -e "${C}╚════════════════════════════════════════════╝${RES}"
+    echo -e "${CYAN}========= • =========${RESET}"
+    echo -e "${BOLD}${BLUE} ██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗™${RESET}"
+    echo -e "${BOLD}${BLUE} ██╔══██╗██╔════╝ ████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝ ${RESET}"
+    echo -e "${BOLD}${BLUE} ██████╔╝██║  ███╗██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗ ${RESET}"
+    echo -e "${BOLD}${BLUE} ██╔══██╗██║   ██║██║╚██╗██║██║   ██║██║  ██║██╔══╝  ╚════██║ ${RESET}"
+    echo -e "${BOLD}${BLUE} ██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██████╔╝███████╗███████║ ${RESET}"
+    echo -e "${MAGENTA}           Made By 𝐌ɾ. 𝐙ᥱ𝚝𝚛𝐢xs                 ${RESET}"
+    echo -e "${CYAN}========= • =========${RESET}"
+    echo -e "${YELLOW}  Uptime        :${RESET} ${GREEN}${UPTIME_VAL}${RESET}"
+    echo -e "${YELLOW}  OS            :${RESET} ${CYAN}${OS_VAL}${RESET}"
+    echo -e "${YELLOW}  PM2           :${RESET} ${PM2_VAL}"
+    echo -e "${YELLOW}  Status        :${RESET} ${TUNNEL_UI_STATUS}"
+    echo -e "${CYAN}========= • =========${RESET}"
 }
 
 exit_anim() {
-    echo -e "${Y} [ * ] Shutting down safely. Goodbye!${RES}"; sleep 0.5
+    echo -e "${YELLOW}Good Bye!${RESET}"; sleep 0.5
     exit 0
 }
 
-# Initial Startup Splash with 4-second Neofetch
-clear
-if command -v neofetch &> /dev/null; then
-    echo -e "${M}"
-    neofetch --off
-    echo -e "${RES}"
-    sleep 4
-fi
+# Run Auto OS Setup On Startup
+system_init
 
 while true; do
     show_banner
-    echo -e "${W} [ 1 / A ]${RES} ${G}➔ Install ( Auto Mode )${RES}"
-    echo -e "${W} [ 2 / B ]${RES} ${R}➔ Uninstall Tunnels${RES}"
-    echo -e "${W} [ 3 / C ]${RES} ${C}➔ Live Logs${RES}"
-    echo -e "${W} [ 4 / E ]${RES} ${Y}➔ Shut Down${RES}"
-    echo -e "${C}──────────────────────────────────────────────${RES}"
-    read -p "Select Command Option: " CHOICE
+    echo -e "${WHITE}[ A ]${RESET} Install ( HTTP / HTTPS via TryCloudflare | TCP via Pinggy )"
+    echo -e "${WHITE}[ B ]${RESET} Uninstall ( Remove Tunnel )"
+    echo -e "${WHITE}[ C ]${RESET} Tunnel Logs ( Checking Status )"
+    echo -e "${WHITE}[ E ]${RESET} Exit"
+    echo -e "${CYAN}========= • =========${RESET}"
+    read -p "Choose Option [ Info ]: " CHOICE
 
     case "${CHOICE,,}" in
-        a|1)
+        a)
             clear
-            echo -e "${C}╔════════════════════════════════════════════╗${RES}"
-            echo -e "${G}${BOLD}         🚀 ADVANCED TUNNEL CONFIGURATION     ${RES}"
-            echo -e "${C}╚════════════════════════════════════════════╝${RES}"
+            echo -e "${CYAN}========= • =========${RESET}"
+            echo -e "${BOLD}${GREEN} 🚀 UNIVERSAL TUNNEL SETUP (24/7 AUTO-RECOVER) ${RESET}"
+            echo -e "${CYAN}========= • =========${RESET}"
             
-            read -p "Enter PM2 Process Name [Default: pinggy-core]: " PM2_NAME
-            PM2_NAME=${PM2_NAME:-pinggy-core}
+            read -p "PM2 name [Default: auto-tunnel]: " PM2_NAME
+            PM2_NAME=${PM2_NAME:-auto-tunnel}
 
-            read -p "Select Protocol (http / https / tcp) [Default: http]: " PROTOCOL
+            read -p "Protocol (http / https / tcp) [Default: http]: " PROTOCOL
             PROTOCOL=${PROTOCOL:-http}
             PROTOCOL_LOWER=$(echo "$PROTOCOL" | tr '[:upper:]' '[:lower:]')
 
-            read -p "Enter Local Target Port (e.g., 22, 3306, 3000) [Default: 3000]: " LOCAL_PORT
-            LOCAL_PORT=${LOCAL_PORT:-3000}
+            NOTLS_ARG=""
+            REGION_ARG=""
+            TUNNEL_TARGET=""
+            IS_PINGGY=false
 
-            # On-Demand Auto Installation of Missing Dependencies when A is clicked
-            echo -e "\n${C} [ ➔ ] Verifying Core Dependencies (PM2 & OpenSSH)...${RES}"
-            if ! command -v pm2 &> /dev/null; then
-                show_progress "Installing PM2 Enterprise Daemon"
-                npm install -g pm2 > /dev/null 2>&1
-            fi
+            if [ "$PROTOCOL_LOWER" = "tcp" ]; then
+                IS_PINGGY=true
+                read -p "Local Port (e.g., 22, 3306, 3000) [Default: 3000]: " LOCAL_PORT
+                LOCAL_PORT=${LOCAL_PORT:-3000}
+            else
+                read -p "Tunnel Port (e.g., 3000) [Default: 3000]: " TUNNEL_PORT
+                TUNNEL_PORT=${TUNNEL_PORT:-3000}
+                TUNNEL_TARGET="${PROTOCOL_LOWER}://localhost:${TUNNEL_PORT}"
 
-            if ! command -v ssh &> /dev/null; then
-                show_progress "Installing OpenSSH Secure Client"
-                if command -v apt-get &> /dev/null; then
-                    apt-get update -y > /dev/null 2>&1 && apt-get install -y openssh-client > /dev/null 2>&1
-                elif command -v apk &> /dev/null; then
-                    apk add --no-cache openssh-client > /dev/null 2>&1
-                elif command -v dnf &> /dev/null; then
-                    dnf install -y openssh-clients > /dev/null 2>&1
+                if [ "$PROTOCOL_LOWER" = "https" ]; then
+                    read -p "NoTLSVerify [ T/F ] [Default: T]: " NOTLS_CHOICE
+                    NOTLS_CHOICE=${NOTLS_CHOICE:-T}
+                    if [[ "${NOTLS_CHOICE,,}" == "t" ]]; then
+                        NOTLS_ARG="--no-tls-verify"
+                    fi
                 fi
             fi
 
-            SSH_TARGET="free.pinggy.io"
-            if [ "$PROTOCOL_LOWER" = "tcp" ]; then
-                SSH_TARGET="tcp@free.pinggy.io"
+            echo -e "\n${CYAN}========= • =========${RESET}"
+            echo -e "${BOLD}${GREEN} ⚙️ CHECKING DEPENDENCIES ${RESET}"
+            echo -e "${CYAN}========= • =========${RESET}"
+            
+            if ! command -v pm2 &> /dev/null; then
+                show_progress "Installing PM2"
+                npm install -g pm2 > /dev/null 2>&1
+            else
+                echo -e "$(tag_info "Info") PM2 is already active & installed."
             fi
 
-            echo -e "\n${C}══════════════════════════════════════════════${RES}"
-            show_progress "Establishing 99.99% Uptime Persistent Tunnel"
+            if [ "$IS_PINGGY" = true ]; then
+                if ! command -v ssh &> /dev/null; then
+                    show_progress "Installing OpenSSH Client"
+                    if command -v apt-get &> /dev/null; then
+                        apt-get update -y > /dev/null 2>&1 && apt-get install -y openssh-client > /dev/null 2>&1
+                    elif command -v apk &> /dev/null; then
+                        apk add --no-cache openssh-client > /dev/null 2>&1
+                    elif command -v dnf &> /dev/null; then
+                        dnf install -y openssh-clients > /dev/null 2>&1
+                    fi
+                fi
+            else
+                show_progress "Fetching Cloudflare Tunnel Binary"
+                pm2 delete "$PM2_NAME" 2>/dev/null
+                killall cloudflared 2>/dev/null
+                rm -f /usr/local/bin/cloudflared
+                
+                ARCH=$(uname -m)
+                if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+                    CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
+                else
+                    CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+                fi
+
+                curl -L --output /usr/local/bin/cloudflared "$CF_URL" > /dev/null 2>&1
+                chmod +x /usr/local/bin/cloudflared
+            fi
+
+            echo -e "\n${CYAN}========= • =========${RESET}"
+            echo -e "${BOLD}${GREEN} 🔄 SETUP 24/7 AUTO-RECOVER BACKGROUND TUNNEL ${RESET}"
+            echo -e "${CYAN}========= • =========${RESET}"
+            show_progress "Configuring PM2 Persistent Service"
 
             pm2 delete "$PM2_NAME" 2>/dev/null
+
+            if [ "$IS_PINGGY" = true ]; then
+                # 24/7 Persistent SSH Pinggy Tunnel for TCP with auto-reconnect flags and 24/7 restart configurations
+                pm2 start ssh --name "${PM2_NAME}" --restart-delay=3000 --max-restarts=999999 -- -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=5 -R0:localhost:${LOCAL_PORT} tcp@free.pinggy.io > /dev/null 2>&1
+            else
+                CMD_ARGS="--url ${TUNNEL_TARGET}"
+                [ -n "$NOTLS_ARG" ] && CMD_ARGS="${CMD_ARGS} ${NOTLS_ARG}"
+                
+                # PM2 restart-delay & max-restarts ensure 24/7 auto-recovery if offline/dropped
+                pm2 start /usr/local/bin/cloudflared --name "${PM2_NAME}" --restart-delay=3000 --max-restarts=999999 -- ${CMD_ARGS} > /dev/null 2>&1
+            fi
             
-            # Start secure, persistent keep-alive background daemon via PM2
-            pm2 start ssh --name "${PM2_NAME}" -- -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=5 -R0:localhost:${LOCAL_PORT} ${SSH_TARGET} > /dev/null 2>&1
             pm2 save > /dev/null 2>&1
 
-            echo -e "${C} [ ➔ ] Extracting secure routing address...${RES}"
+            echo -e "$(tag_info "Info") Extracting Tunnel Connection Target..."
             TUNNEL_LINK=""
             for i in {1..15}; do
                 sleep 1
-                if [ "$PROTOCOL_LOWER" = "tcp" ]; then
+                if [ "$IS_PINGGY" = true ]; then
                     TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -oE 'tcp://[a-zA-Z0-9.-]*:[0-9]*' | tail -n 1)
                 else
-                    TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.pinggy\.(link|io)' | tail -n 1)
+                    TUNNEL_LINK=$(pm2 logs "${PM2_NAME}" --lines 50 --nostream 2>/dev/null | grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' | tail -n 1)
                 fi
                 if [ -n "$TUNNEL_LINK" ]; then
                     break
                 fi
             done
 
-            # Universal Auto-Clipboard Copy Engine
+            # Automatic Multi-Environment Clipboard Copy Logic
             AUTO_COPIED=""
             if [ -n "$TUNNEL_LINK" ]; then
                 if command -v termux-clipboard-set &> /dev/null; then
                     echo -n "$TUNNEL_LINK" | termux-clipboard-set
-                    AUTO_COPIED="(Auto-Copied to Clipboard!)"
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
                 elif command -v xclip &> /dev/null; then
                     echo -n "$TUNNEL_LINK" | xclip -selection clipboard
-                    AUTO_COPIED="(Auto-Copied to Clipboard!)"
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
                 elif command -v xsel &> /dev/null; then
                     echo -n "$TUNNEL_LINK" | xsel --clipboard --input
-                    AUTO_COPIED="(Auto-Copied to Clipboard!)"
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
                 elif command -v pbcopy &> /dev/null; then
                     echo -n "$TUNNEL_LINK" | pbcopy
-                    AUTO_COPIED="(Auto-Copied to Clipboard!)"
+                    AUTO_COPIED="(Auto-copied to clipboard!)"
                 fi
             fi
 
-            echo -e "\n${G}╔════════════════════════════════════════════╗${RES}"
-            echo -e "${G}${BOLD}         ✅ TUNNEL DEPLOYED SUCCESSFULLY!     ${RES}"
-            echo -e "${G}╚════════════════════════════════════════════╝${RES}"
-            echo -e "${W} 🔹 Process Name : ${C}${BOLD}${PM2_NAME}${RES}"
-            echo -e "${W} 🔹 Protocol     : ${C}${BOLD}${PROTOCOL_LOWER^^}${RES}"
-            echo -e "${W} 🔹 Local Port   : ${C}${BOLD}${LOCAL_PORT}${RES}"
+            echo -e "\n${GREEN}==========================================${RESET}"
+            echo -e "${BOLD}${GREEN} ✅ SUCCESSFULLY COMPLETED! ${RESET}"
+            echo -e "${GREEN}==========================================${RESET}"
+            echo -e "${WHITE} PM2 Name     : ${CYAN}${BOLD}${PM2_NAME}${RESET}"
+            echo -e "${WHITE} Protocol     : ${CYAN}${BOLD}${PROTOCOL_LOWER^^}${RESET}"
 
-            if [ -n "$TUNNEL_LINK" ]; then
-                echo -e "${W} 🔹 Public Link  : ${G}${BOLD}${TUNNEL_LINK} ${Y}${AUTO_COPIED}${RES}"
+            if [ "$IS_PINGGY" = true ]; then
+                echo -e "${WHITE} Local Port   : ${CYAN}${BOLD}${LOCAL_PORT}${RESET}"
+                echo -e "${WHITE} TCP Target   : ${CYAN}${BOLD}tcp://localhost:${LOCAL_PORT}${RESET}"
+                if [ -n "$TUNNEL_LINK" ]; then
+                    echo -e "${WHITE} TCP Link     : ${GREEN}${BOLD}${TUNNEL_LINK} ${YELLOW}${AUTO_COPIED}${RESET}"
+                else
+                    echo -e "$(tag_info "Info") TCP 24/7 tunnel active. Check Option C for live link."
+                fi
             else
-                echo -e "${Y} [ ! ] Link initializing. Check Option [3/C] for diagnostics.${RES}"
+                echo -e "${WHITE} Target Port  : ${CYAN}${BOLD}${TUNNEL_PORT}${RESET}"
+                if [ -n "$TUNNEL_LINK" ]; then
+                    echo -e "${WHITE} Live Link    : ${CYAN}${BOLD}${TUNNEL_LINK} ${YELLOW}${AUTO_COPIED}${RESET}"
+                else
+                    echo -e "$(tag_info "Info") Check Option C for your live link."
+                fi
             fi
-            echo -e "${G}──────────────────────────────────────────────${RES}"
-            read -p "Press [ Enter ] to return to main dashboard..."
+            echo -e "${GREEN}==========================================${RESET}"
+            read -p "Press [ Enter ] to return to menu"
             ;;
-        b|2)
+        b)
             clear
-            echo -e "${R}╔════════════════════════════════════════════╗${RES}"
-            echo -e "${R}${BOLD}         ⚠️ TERMINATING TUNNEL SESSIONS       ${RES}"
-            echo -e "${R}╚════════════════════════════════════════════╝${RES}"
-            read -p "Enter PM2 Process Name to clean [Default: pinggy-core]: " DEL_NAME
-            DEL_NAME=${DEL_NAME:-pinggy-core}
+            echo -e "${RED}[ Warning ] Removing and Uninstalling Tunnel...${RESET}"
+            read -p "Enter PM2 Name to delete [Default: auto-tunnel]: " DEL_NAME
+            DEL_NAME=${DEL_NAME:-auto-tunnel}
             pm2 delete "$DEL_NAME" 2>/dev/null
+            killall cloudflared 2>/dev/null
+            rm -f /usr/local/bin/cloudflared
             pm2 save > /dev/null 2>&1
-            echo -e "${G} [ ✔ ] Target tunnel instance successfully purged!${RES}"
-            read -p "Press [ Enter ] to return to main dashboard..."
+            echo -e "$(tag_info "Info") Successfully Uninstalled and Cleaned Up!"
+            read -p "Press [ Enter ] to return to menu"
             ;;
-        c|3)
+        c)
             clear
-            echo -e "${C}╔════════════════════════════════════════════╗${RES}"
-            echo -e "${B}${BOLD}         📊 REAL-TIME DIAGNOSTICS & LOGS      ${RES}"
-            echo -e "${C}╚════════════════════════════════════════════╝${RES}"
+            echo -e "${CYAN}========= • =========${RESET}"
+            echo -e "${BOLD}${BLUE} 📊 TUNNEL LOGS & STATUS ${RESET}"
+            echo -e "${CYAN}========= • =========${RESET}"
             pm2 status
-            echo -e "\n${M}Active Public Route Target:${RES}"
-            ACTIVE_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.pinggy\.(link|io)|tcp://[a-zA-Z0-9.-]*:[0-9]*' | tail -n 1)
+            echo -e "\n${MAGENTA}Active connection / link:${RESET}"
+            ACTIVE_LINK=$(pm2 logs --lines 50 --nostream 2>/dev/null | grep -oE 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com|tcp://[a-zA-Z0-9.-]*:[0-9]*|https://[a-zA-Z0-9.-]*\.pinggy\.(link|io)' | tail -n 1)
             if [ -n "$ACTIVE_LINK" ]; then
-                echo -e "${W} Route ➔ ${C}${BOLD}${ACTIVE_LINK}${RES}"
+                echo -e "${WHITE} Connection ====> ${CYAN}${BOLD}${ACTIVE_LINK}${RESET}"
             else
-                echo -e "${Y} [ ! ] No active public stream detected in logs yet.${RES}"
+                echo -e "$(tag_info "Info") No active connection found in recent logs."
             fi
-            echo -e "${C}──────────────────────────────────────────────${RES}"
-            read -p "Press [ Enter ] to return to main dashboard..."
+            echo -e "${CYAN}==================================${RESET}"
+            read -p "Press [ Enter ] anytime to exit"
             ;;
-        e|4)
+        e)
             exit_anim
             ;;
         *)
-            echo -e "${R} [ X ] Invalid option selected! Please choose A, B, C, or E.${RES}"
-            sleep 1.2
+            echo -e "$(tag_info "Info") Invalid Option! Please choose A, B, C, or E."
+            sleep 1.5
             ;;
     esac
 done
