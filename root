@@ -5,31 +5,18 @@
 #                 RGNODES™ PROOT SYSTEM                    #
 #                   Ubuntu 22.04 LTS VM                    #
 #                                                          #
-#       Fast • Stable • Optimized • KVM & Dedicated IP     #
+#     High-Performance KVM • Dedicated IP • Cloudflare     #
+#                      24/7 PM2 Ready                      #
 #                                                          #
 ############################################################
 
-############################
-# ROOTFS DIRECTORY
-############################
-
 ROOTFS_DIR="$(pwd)"
-
-export PATH="$PATH:$HOME/.local/usr/bin"
-
-############################
-# SETTINGS
-############################
+export PATH="$PATH:$HOME/.local/usr/bin:/usr/local/bin"
 
 MAX_RETRIES=50
 TIMEOUT=10
 
-############################
-# COLORS
-############################
-
 RESET='\033[0m'
-
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
@@ -38,239 +25,143 @@ MAGENTA='\033[1;35m'
 CYAN='\033[1;36m'
 WHITE='\033[1;37m'
 
-############################
-# ARCH DETECTION
-############################
-
 ARCH="$(uname -m)"
-
 case "$ARCH" in
-    x86_64)
-        ARCH_ALT="amd64"
-        ;;
-    aarch64|arm64)
-        ARCH_ALT="arm64"
-        ;;
-    *)
-        echo -e "${RED}[ERROR] Unsupported architecture: $ARCH${RESET}"
-        exit 1
-        ;;
+    x86_64) ARCH_ALT="amd64" ;;
+    aarch64|arm64) ARCH_ALT="arm64" ;;
+    *) echo -e "${RED}[ERROR] Unsupported architecture: $ARCH${RESET}"; exit 1 ;;
 esac
 
-############################
-# ASCII LOGO
-############################
-
 show_logo() {
-
 clear
-
 echo -e "${MAGENTA}"
-
-cat << "EOF"
+cat << 'EOF'
 ██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗
 ██╔══██╗██╔════╝ ████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝
 ██████╔╝██║  ███╗██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗
-██╔══██╗██║   ██║██║╚██╗██║██║   ██║██╔══██║██╔══╝  ╚╚════██║
+██╔══██╗██║   ██║██║╚██╗██║██║   ██║██╔══██║██╔══╝  ╚════██║
 ██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██████╔╝███████╗███████║
 ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝
 EOF
-
 echo -e "${RESET}"
-
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "${GREEN}          RGNODES™ Ubuntu 22.04 LTS Proot VM${RESET}"
-echo -e "${YELLOW}       High-Performance KVM & Dedicated IP Edition${RESET}"
+echo -e "${YELLOW}       High-Performance KVM & Cloudflare Edition${RESET}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
 echo ""
 }
 
-############################
-# INSTALL DEPENDENCIES
-############################
-
 install_dependencies() {
+echo -e "${CYAN}[*] Checking and installing core dependencies...${RESET}"
+if command -v apt >/dev/null 2>&1; then
+    apt update -y
+    apt install -y wget curl tar xz-utils proot iproute2 net-tools nodejs npm
+elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache wget curl tar xz proot iproute2 net-tools nodejs npm
+elif command -v yum >/dev/null 2>&1; then
+    yum install -y wget curl tar xz proot iproute2 net-tools nodejs npm
+fi
 
-echo -e "${CYAN}[*] Checking dependencies...${RESET}"
+# Ensure PM2 is installed globally for 24/7 uptime management
+if ! command -v pm2 >/dev/null 2>&1; then
+    echo -e "${YELLOW}[*] Installing PM2 for 24/7 process management...${RESET}"
+    npm install -g pm2 || true
+fi
 
-if ! command -v wget >/dev/null 2>&1; then
-
-    echo -e "${YELLOW}[*] Installing required packages...${RESET}"
-
-    if command -v apt >/dev/null 2>&1; then
-        apt update -y
-        apt install wget curl tar xz-utils proot iproute2 net-tools -y
-
-    elif command -v apk >/dev/null 2>&1; then
-        apk add wget curl tar xz proot iproute2 net-tools
-
-    elif command -v yum >/dev/null 2>&1; then
-        yum install wget curl tar xz proot iproute2 net-tools -y
-
+# Install Cloudflared for secure port exposure & Cloudflare support
+if ! command -v cloudflared >/dev/null 2>&1; then
+    echo -e "${YELLOW}[*] Installing Cloudflare Tunnel (cloudflared)...${RESET}"
+    if [ "$ARCH_ALT" = "amd64" ]; then
+        curl -L --output /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
     else
-        echo -e "${RED}[ERROR] Unsupported package manager.${RESET}"
-        exit 1
+        curl -L --output /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64
     fi
+    chmod +x /tmp/cloudflared
+    mkdir -p /usr/local/bin
+    mv /tmp/cloudflared /usr/local/bin/cloudflared || cp /tmp/cloudflared "$ROOTFS_DIR/usr/local/bin/cloudflared"
 fi
 }
 
-############################
-# AUTO DETECT DEDICATED IPV4
-############################
-
 detect_dedicated_ipv4() {
     echo -e "${CYAN}[*] Auto-detecting dedicated IPv4 address...${RESET}"
-    
     DETECTED_IP=$(ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^172\.' | head -n 1)
-    
     if [ -z "$DETECTED_IP" ] || [ "$DETECTED_IP" = "127.0.0.1" ]; then
         DETECTED_IP=$(curl -s --max-time 3 https://api.ipify.org || curl -s --max-time 3 https://ifconfig.me)
-    }
-
+    fi
     if [ -z "$DETECTED_IP" ]; then
         DEDICATED_IPV4="Unavailable"
     else
         DEDICATED_IPV4="$DETECTED_IP"
     fi
-    
     echo -e "${GREEN}[+] Dedicated IPv4 Detected: ${WHITE}$DEDICATED_IPV4${RESET}"
 }
 
-############################
-# INSTALL UBUNTU ROOTFS
-############################
-
 install_ubuntu() {
-
 UBUNTU_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-${ARCH_ALT}.tar.gz"
-
 echo -e "${CYAN}[*] Downloading Ubuntu 22.04 RootFS...${RESET}"
-
-wget \
---tries="$MAX_RETRIES" \
---timeout="$TIMEOUT" \
---show-progress \
---no-hsts \
--O /tmp/rootfs.tar.gz \
-"$UBUNTU_URL"
-
+wget --tries="$MAX_RETRIES" --timeout="$TIMEOUT" --show-progress --no-hsts -O /tmp/rootfs.tar.gz "$UBUNTU_URL"
 if [ ! -f /tmp/rootfs.tar.gz ]; then
     echo -e "${RED}[ERROR] Failed to download Ubuntu RootFS.${RESET}"
     exit 1
 fi
-
 echo -e "${GREEN}[*] Extracting Ubuntu filesystem...${RESET}"
-
+mkdir -p "$ROOTFS_DIR"
 tar -xpf /tmp/rootfs.tar.gz -C "$ROOTFS_DIR"
-
 if [ $? -ne 0 ]; then
     echo -e "${RED}[ERROR] Extraction failed.${RESET}"
     exit 1
 fi
-
 rm -f /tmp/rootfs.tar.gz
 }
 
-############################
-# DOWNLOAD PROOT
-############################
-
 download_proot() {
-
 mkdir -p "$ROOTFS_DIR/usr/local/bin"
-
 echo -e "${CYAN}[*] Downloading PRoot binary...${RESET}"
-
-wget \
---tries="$MAX_RETRIES" \
---timeout="$TIMEOUT" \
---show-progress \
---no-hsts \
--O "$ROOTFS_DIR/usr/local/bin/proot" \
-"https://proot.gitlab.io/proot/bin/proot"
-
+wget --tries="$MAX_RETRIES" --timeout="$TIMEOUT" --show-progress --no-hsts -O "$ROOTFS_DIR/usr/local/bin/proot" "https://proot.gitlab.io/proot/bin/proot"
 chmod +x "$ROOTFS_DIR/usr/local/bin/proot"
 }
 
-############################
-# CONFIGURE SYSTEM & AUTO SSH
-############################
-
 configure_system() {
-
-echo -e "${CYAN}[*] Configuring Ubuntu environment & Auto-creating SSH...${RESET}"
-
+echo -e "${CYAN}[*] Configuring Ubuntu environment, permissions & hostname...${RESET}"
 echo "nameserver 1.1.1.1" > "$ROOTFS_DIR/etc/resolv.conf"
 echo "nameserver 8.8.8.8" >> "$ROOTFS_DIR/etc/resolv.conf"
 
-# Set hostname inside container
 echo "rgnodes-vps" > "$ROOTFS_DIR/etc/hostname"
 echo "127.0.0.1 localhost rgnodes-vps" > "$ROOTFS_DIR/etc/hosts"
 
-cat > "$ROOTFS_DIR/root/setup.sh" << 'EOF'
+cat << 'EOF' > "$ROOTFS_DIR/root/setup.sh"
 #!/bin/bash
-
 export DEBIAN_FRONTEND=noninteractive
-
 apt update -y
+apt install -y sudo curl wget nano vim git htop neofetch net-tools openssh-server ca-certificates software-properties-common zip unzip screen tmux python3 python3-pip
 
-apt install -y \
-sudo \
-curl \
-wget \
-nano \
-vim \
-git \
-htop \
-neofetch \
-net-tools \
-openssh-server \
-ca-certificates \
-software-properties-common \
-zip \
-unzip \
-screen \
-tmux \
-python3 \
-python3-pip
-
-# Set default credentials
 echo "root:root" | chpasswd
-
 mkdir -p /var/run/sshd
 
-# Configure SSH for 100% working login
 sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-# Start SSH Service automatically
 service ssh start || /usr/sbin/sshd
 
-clear
+# Run remote RGNODES MOTD Installer if available
+curl -sSL https://raw.githubusercontent.com/mrzetrixyt-525/vm-/main/MOTD-Installer -o /tmp/motd-installer && chmod +x /tmp/motd-installer && /tmp/motd-installer || true
 
+clear
 echo ""
 echo "======================================"
 echo "      RGNODES™ UBUNTU READY"
 echo "======================================"
 echo ""
-
 neofetch
-
 EOF
 
 chmod +x "$ROOTFS_DIR/root/setup.sh"
-
+chmod 755 "$ROOTFS_DIR"
 touch "$ROOTFS_DIR/.installed"
 }
 
-############################
-# SYSTEM INFORMATION
-############################
-
 show_system_info() {
-
 RAM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
 RAM_USED=$(free -m | awk '/Mem:/ {print $3}')
 RAM_FREE=$(free -m | awk '/Mem:/ {print $4}')
@@ -318,9 +209,10 @@ echo -e "Dedicated IPv4 : ${WHITE}${DEDICATED_IPV4}${RESET}"
 echo -e "SSH Status     : ${GREEN}Auto-Configured (100% Working)${RESET}"
 echo -e "Default Login  : ${WHITE}root / root${RESET}"
 echo ""
-echo -e "${GREEN}Container Runtime${RESET}"
+echo -e "${GREEN}Container Runtime & 24/7 PM2${RESET}"
 echo -e "RootFS Path    : ${WHITE}$ROOTFS_DIR${RESET}"
 echo -e "System Uptime  : ${WHITE}$UPTIME_INFO${RESET}"
+echo -e "PM2 Status     : ${GREEN}Ready for 24/7 deployment${RESET}"
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
@@ -328,35 +220,19 @@ echo -e "${MAGENTA}[*] Launching RGNODES™ High-Performance VM...${RESET}"
 echo ""
 }
 
-############################
-# MAIN EXECUTION
-############################
-
 show_logo
-
 install_dependencies
-
 detect_dedicated_ipv4
 
 if [ ! -f "$ROOTFS_DIR/.installed" ]; then
-
     echo -e "${YELLOW}[*] First launch detected. Initializing RGNODES™ setup...${RESET}"
-
     install_ubuntu
-
     download_proot
-
     configure_system
-
     echo -e "${GREEN}[*] RGNODES™ Ubuntu installation completed successfully.${RESET}"
-
 fi
 
 show_system_info
-
-############################
-# START PROOT
-############################
 
 exec "$ROOTFS_DIR/usr/local/bin/proot" \
 --rootfs="$ROOTFS_DIR" \
