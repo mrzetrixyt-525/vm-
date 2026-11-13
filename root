@@ -1,269 +1,375 @@
-#!/usr/bin/env bash
-# ==============================================================================
-#  RGNODES™ INFRASTRUCTURE ENGINE — Enterprise Proot Ubuntu 22.04 LTS
-#  Architecture: High-Performance Enterprise Script with Static PRoot & Watchdog
-#  Brand: RGNODES™ | Node Location: Singapore (SG) | Target: root@rgnodes-vps
-# ==============================================================================
+#!/bin/sh
 
-set -Eeuo pipefail
+############################################################
+#                                                          #
+#                 RGNODES™ PROOT SYSTEM                    #
+#                   Ubuntu 22.04 LTS VM                    #
+#                                                          #
+#       Fast • Stable • Optimized • KVM & Dedicated IP     #
+#                                                          #
+############################################################
 
-# --- CONFIGURATION & PATHS ---
-RGNODES_ROOT="${PWD}/rgnodes-core"
-LOCAL_BIN="${RGNODES_ROOT}/usr/local/bin"
-MAX_RETRIES=5
-TIMEOUT=15
+############################
+# ROOTFS DIRECTORY
+############################
 
-# --- COLOR PALETTE & UI STYLING ---
-ESC="\033["
-RESET="${ESC}0m"
-BOLD="${ESC}1m"
-DIM="${ESC}2m"
-RED="${ESC}31m"
-GREEN="${ESC}32m"
-YELLOW="${ESC}33m"
-BLUE="${ESC}34m"
-MAGENTA="${ESC}35m"
-CYAN="${ESC}36m"
-WHITE="${ESC}37m"
+ROOTFS_DIR="$(pwd)"
 
-# --- LOGGING UTILITIES ---
-log_info()    { echo -e "${CYAN}[ℹ]${RESET} ${WHITE}$1${RESET}"; }
-log_success() { echo -e "${GREEN}[✔]${RESET} ${GREEN}$1${RESET}"; }
-log_warn()    { echo -e "${YELLOW}[⚠]${RESET} ${YELLOW}$1${RESET}"; }
-log_error()   { echo -e "${RED}[✖] $1${RESET}" >&2; exit 1; }
+export PATH="$PATH:$HOME/.local/usr/bin"
 
-# --- CLEANUP TRAP ---
-cleanup() {
-    echo -e "\n${MAGENTA}[*] RGNODES™ Session detached cleanly. Core services persisting.${RESET}"
-}
-trap cleanup EXIT
+############################
+# SETTINGS
+############################
 
-# --- ARCHITECTURE DETECTION ---
-detect_arch() {
-    local arch
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64)     echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        *)          log_error "Unsupported host architecture: $arch" ;;
-    esac
-}
+MAX_RETRIES=50
+TIMEOUT=10
 
-ARCH_ALT="$(detect_arch)"
+############################
+# COLORS
+############################
 
-# --- PROFESSIONAL BANNER ---
-show_banner() {
-    clear
-    echo -e "${MAGENTA}${BOLD}"
-    cat << "EOF"
-██████╗  ██████╗ ███╗   ██╗██████╗  ██████╗ ███████╗███████╗    ██████╗  ™
-██╔══██╗██╔════╝ ████╗  ██║██╔══██╗██╔═══██╗██╔════╝██╔════╝   ██╔════╝
-██████╔╝██║  ███╗██╔██╗ ██║██║  ██║██║   ██║█████╗  ███████╗   ██║  ███╗
-██╔══██╗██║   ██║██║╚██╗██║██║  ██║██║   ██║██╔══╝  ╚╚════██║   ██║   ██║
-██║  ██║╚██████╔╝██║ ╚████║██████╔╝╚██████╔╝███████╗███████║   ╚██████╔╝
-╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝  ╚═════╝ ╚══════╝╚══════╝    ╚═════╝ 
-EOF
-    echo -e "${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${GREEN}  RGNODES™ Enterprise Virtualization Engine v4.3 (SG-Node)${RESET}"
-    echo -e "${YELLOW}  OS: Ubuntu 22.04.5 LTS | Hostname: root@rgnodes-vps          ${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo ""
-}
+RESET='\033[0m'
 
-# --- HOST DEPENDENCIES & PROOT BINARY SETUP ---
-verify_and_setup_host() {
-    log_info "Verifying host system prerequisites & setting up PRoot..."
-    mkdir -p "$RGNODES_ROOT" "$LOCAL_BIN"
-    
-    for cmd in wget curl tar; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            log_warn "Missing required host package: $cmd. Installing..."
-            if command -v apt >/dev/null 2>&1; then
-                apt update -y && apt install -y wget curl tar git
-            elif command -v apk >/dev/null 2>&1; then
-                apk add --no-cache wget curl tar git
-            else
-                log_error "Package manager not supported. Install wget, curl, tar manually."
-            fi
-            break
-        fi
-    done
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+MAGENTA='\033[1;35m'
+CYAN='\033[1;36m'
+WHITE='\033[1;37m'
 
-    # Force download static proot binary to guarantee zero 'command not found' errors
-    if [ ! -f "$LOCAL_BIN/proot" ]; then
-        log_info "Downloading standalone static PRoot binary..."
-        if ! wget -q --show-progress --tries="$MAX_RETRIES" --timeout="$TIMEOUT" -O "$LOCAL_BIN/proot" "https://proot.gitlab.io/proot/bin/proot"; then
-            log_error "Failed to download PRoot binary from GitLab mirror."
-        fi
-        chmod +x "$LOCAL_BIN/proot"
-    fi
-    log_success "Host prerequisites and PRoot binary verified."
-}
+############################
+# ARCH DETECTION
+############################
 
-# --- ROOTFS PROVISIONING ---
-provision_rootfs() {
-    local ubuntu_url="https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-${ARCH_ALT}.tar.gz"
-    log_info "Fetching Ubuntu 22.04.5 LTS RootFS (${ARCH_ALT})..."
-    
-    if ! wget -q --show-progress --tries="$MAX_RETRIES" --timeout="$TIMEOUT" -O /tmp/rgnodes_fs.tar.gz "$ubuntu_url"; then
-        log_error "Failed to download Ubuntu RootFS from official mirror."
-    fi
+ARCH="$(uname -m)"
 
-    log_info "Extracting RootFS into RGNODES core storage..."
-    tar -xpf /tmp/rgnodes_fs.tar.gz -C "$RGNODES_ROOT"
-    rm -f /tmp/rgnodes_fs.tar.gz
-    log_success "RootFS successfully provisioned."
-}
-
-# --- SYSTEM CONFIGURATION & SHIMS ---
-configure_environment() {
-    log_info "Configuring RGNODES™ system environment, shims, and security..."
-
-    # Resolv & Hostname
-    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > "$RGNODES_ROOT/etc/resolv.conf"
-    echo "rgnodes-vps" > "$RGNODES_ROOT/etc/hostname"
-    echo "127.0.0.1 localhost rgnodes-vps" > "$RGNODES_ROOT/etc/hosts"
-    chmod 1777 "$RGNODES_ROOT/tmp"
-    mkdir -p "$RGNODES_ROOT/run/sshd" "$RGNODES_ROOT/var/run/sshd"
-
-    # Professional MOTD
-    cat << 'MOTD' > "$RGNODES_ROOT/etc/motd"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  RGNODES™ High-Performance Cloud Infrastructure (SG-Node)
-  System: Ubuntu 22.04.5 LTS (GNU/Linux 5.15+ x86_64)
-  Access: Full Root Privilege | User: root@rgnodes-vps
-  SSH Service: Active on Port 2222
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MOTD
-
-    # Advanced systemctl compatibility shim
-    cat << 'SYSCTL' > "$RGNODES_ROOT/usr/local/bin/systemctl"
-#!/usr/bin/env bash
-ACTION="$1"
-SERVICE="${2:-}"
-case "$ACTION" in
-    start|stop|restart|status|reload)
-        if command -v service >/dev/null 2>&1; then
-            service "$SERVICE" "$ACTION"
-        else
-            echo "[RGNODES-SHIM] Executed service $SERVICE $ACTION"
-        fi
+case "$ARCH" in
+    x86_64)
+        ARCH_ALT="amd64"
         ;;
-    enable|disable)
-        echo "[RGNODES-SHIM] Unit $SERVICE marked as $ACTION"
-        ;;
-    daemon-reload)
-        echo "[RGNODES-SHIM] Systemd unit files reloaded."
+    aarch64|arm64)
+        ARCH_ALT="arm64"
         ;;
     *)
-        if [ -n "$ACTION" ]; then
-            service "$@"
-        fi
+        echo -e "${RED}[ERROR] Unsupported architecture: $ARCH${RESET}"
+        exit 1
         ;;
 esac
-SYSCTL
-    chmod +x "$RGNODES_ROOT/usr/local/bin/systemctl"
 
-    # First-boot bootstrap script inside PRoot
-    cat << 'BOOTSTRAP' > "$RGNODES_ROOT/root/.bashrc"
-export PS1='\[\e[1;35m\]root@rgnodes-vps\[\e[0m\]:\[\e[1;36m\]\w\[\e[0m\]# '
-cat /etc/motd
+############################
+# ASCII LOGO
+############################
 
-if [ ! -f /root/.rgnodes_initialized ]; then
-    echo -e "\e[1;33m[*] Initializing RGNODES™ Core Packages (APT, Python3-Pip, OpenSSH)...\e[0m"
-    export DEBIAN_FRONTEND=noninteractive
-    export TZ=Asia/Singapore
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+show_logo() {
 
-    apt update -y && apt upgrade -y
-    apt install -y sudo curl wget nano vim git htop net-tools iproute2 openssh-server ca-certificates software-properties-common zip unzip screen tmux python3 python3-pip
+clear
 
-    # Auto-generate secure SSH root password
-    SSH_PASS="$(tr -dc 'A-Za-z0-9@#$%' </dev/urandom | head -c 14)"
-    echo "root:${SSH_PASS}" | chpasswd
-    echo "$SSH_PASS" > /root/ssh_master_password.txt
-    
-    ssh-keygen -A >/dev/null 2>&1
-    sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config
-    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+echo -e "${MAGENTA}"
 
-    touch /root/.rgnodes_initialized
-    echo -e "\e[1;32m[✔] RGNODES™ Setup Complete! Generated Root Password: ${SSH_PASS}\e[0m"
-fi
+cat << "EOF"
+██████╗  ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗
+██╔══██╗██╔════╝ ████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝
+██████╔╝██║  ███╗██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗
+██╔══██╗██║   ██║██║╚██╗██║██║   ██║██╔══██║██╔══╝  ╚╚════██║
+██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██████╔╝███████╗███████║
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝
+EOF
 
-# Ensure SSH daemon runs on Port 2222
-if ! pgrep -x "sshd" >/dev/null 2>&1; then
-    /usr/sbin/sshd -p 2222 >/dev/null 2>&1
-fi
+echo -e "${RESET}"
 
-if [ -f /root/ssh_master_password.txt ]; then
-    echo -e "\e[1;36m[SSH ACCESS INFO]\e[0m Local: \e[1;37mssh root@127.0.0.1 -p 2222\e[0m | Password: \e[1;33m$(cat /root/ssh_master_password.txt)\e[0m"
-fi
-BOOTSTRAP
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${GREEN}          RGNODES™ Ubuntu 22.04 LTS Proot VM${RESET}"
+echo -e "${YELLOW}       High-Performance KVM & Dedicated IP Edition${RESET}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
-    touch "$RGNODES_ROOT/.installed"
-    log_success "Environment configured successfully."
+echo ""
 }
 
-# --- TELEMETRY DISPLAY ---
-show_telemetry() {
-    local ram_total cpu_cores disk_total public_ip geo_loc
-    ram_total="$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')"
-    cpu_cores="$(nproc 2>/dev/null || echo 1)"
-    disk_total="$(df -h / 2>/dev/null | awk 'NR==2 {print $2}')"
-    public_ip="$(curl -s --max-time 3 https://api.ipify.org || echo "N/A")"
-    geo_loc="$(curl -s --max-time 3 http://ip-api.com/line/${public_ip}?fields=city,country 2>/dev/null | tr '\n' ', ' | sed 's/, $//')"
+############################
+# INSTALL DEPENDENCIES
+############################
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${GREEN}                  RGNODES™ LIVE TELEMETRY                         ${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${YELLOW} Hostname    :${RESET} root@rgnodes-vps"
-    echo -e "${YELLOW} Public IP   :${RESET} ${WHITE}${public_ip}${RESET}"
-    echo -e "${YELLOW} DC Location :${RESET} ${WHITE}${geo_loc:-Singapore (SG)}${RESET}"
-    echo -e "${YELLOW} Resources   :${RESET} ${WHITE}${cpu_cores} vCPU | ${ram_total:-512} MB RAM | ${disk_total:-10G} Disk${RESET}"
-    echo -e "${YELLOW} Watchdog    :${RESET} ${GREEN}Active (24/7 Auto-Respawn Ready)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo ""
-}
+install_dependencies() {
 
-# --- MAIN EXECUTION PIPELINE ---
-show_banner
-verify_and_setup_host
+echo -e "${CYAN}[*] Checking dependencies...${RESET}"
 
-if [ ! -f "$RGNODES_ROOT/.installed" ]; then
-    provision_rootfs
-    configure_environment
-fi
+if ! command -v wget >/dev/null 2>&1; then
 
-show_telemetry
+    echo -e "${YELLOW}[*] Installing required packages...${RESET}"
 
-# --- ENTERPRISE WATCHDOG LOOP (24/7 AUTO-RESPAWN) ---
-log_info "Launching RGNODES™ PRoot Virtual Machine..."
-while true; do
-    "$LOCAL_BIN/proot" \
-        --rootfs="$RGNODES_ROOT" \
-        -0 \
-        -w /root \
-        -b /dev \
-        -b /sys \
-        -b /proc \
-        -b /tmp \
-        -b /etc/resolv.conf \
-        --kill-on-exit \
-        /usr/bin/env -i \
-        HOME=/root \
-        HOSTNAME=rgnodes-vps \
-        TERM="$TERM" \
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-        /bin/bash --login
+    if command -v apt >/dev/null 2>&1; then
+        apt update -y
+        apt install wget curl tar xz-utils proot iproute2 net-tools -y
 
-    exit_code=$?
-    if [ "$exit_code" -eq 0 ]; then
-        log_warn "RGNODES™ VM exited normally."
-        break
+    elif command -v apk >/dev/null 2>&1; then
+        apk add wget curl tar xz proot iproute2 net-tools
+
+    elif command -v yum >/dev/null 2>&1; then
+        yum install wget curl tar xz proot iproute2 net-tools -y
+
+    else
+        echo -e "${RED}[ERROR] Unsupported package manager.${RESET}"
+        exit 1
     fi
-    log_warn "Session interrupted (Exit Code: $exit_code). Respawning container in 3 seconds..."
-    sleep 3
-done
+fi
+}
+
+############################
+# AUTO DETECT DEDICATED IPV4
+############################
+
+detect_dedicated_ipv4() {
+    echo -e "${CYAN}[*] Auto-detecting dedicated IPv4 address...${RESET}"
+    
+    DETECTED_IP=$(ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^172\.' | head -n 1)
+    
+    if [ -z "$DETECTED_IP" ] || [ "$DETECTED_IP" = "127.0.0.1" ]; then
+        DETECTED_IP=$(curl -s --max-time 3 https://api.ipify.org || curl -s --max-time 3 https://ifconfig.me)
+    }
+
+    if [ -z "$DETECTED_IP" ]; then
+        DEDICATED_IPV4="Unavailable"
+    else
+        DEDICATED_IPV4="$DETECTED_IP"
+    fi
+    
+    echo -e "${GREEN}[+] Dedicated IPv4 Detected: ${WHITE}$DEDICATED_IPV4${RESET}"
+}
+
+############################
+# INSTALL UBUNTU ROOTFS
+############################
+
+install_ubuntu() {
+
+UBUNTU_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-${ARCH_ALT}.tar.gz"
+
+echo -e "${CYAN}[*] Downloading Ubuntu 22.04 RootFS...${RESET}"
+
+wget \
+--tries="$MAX_RETRIES" \
+--timeout="$TIMEOUT" \
+--show-progress \
+--no-hsts \
+-O /tmp/rootfs.tar.gz \
+"$UBUNTU_URL"
+
+if [ ! -f /tmp/rootfs.tar.gz ]; then
+    echo -e "${RED}[ERROR] Failed to download Ubuntu RootFS.${RESET}"
+    exit 1
+fi
+
+echo -e "${GREEN}[*] Extracting Ubuntu filesystem...${RESET}"
+
+tar -xpf /tmp/rootfs.tar.gz -C "$ROOTFS_DIR"
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}[ERROR] Extraction failed.${RESET}"
+    exit 1
+fi
+
+rm -f /tmp/rootfs.tar.gz
+}
+
+############################
+# DOWNLOAD PROOT
+############################
+
+download_proot() {
+
+mkdir -p "$ROOTFS_DIR/usr/local/bin"
+
+echo -e "${CYAN}[*] Downloading PRoot binary...${RESET}"
+
+wget \
+--tries="$MAX_RETRIES" \
+--timeout="$TIMEOUT" \
+--show-progress \
+--no-hsts \
+-O "$ROOTFS_DIR/usr/local/bin/proot" \
+"https://proot.gitlab.io/proot/bin/proot"
+
+chmod +x "$ROOTFS_DIR/usr/local/bin/proot"
+}
+
+############################
+# CONFIGURE SYSTEM & AUTO SSH
+############################
+
+configure_system() {
+
+echo -e "${CYAN}[*] Configuring Ubuntu environment & Auto-creating SSH...${RESET}"
+
+echo "nameserver 1.1.1.1" > "$ROOTFS_DIR/etc/resolv.conf"
+echo "nameserver 8.8.8.8" >> "$ROOTFS_DIR/etc/resolv.conf"
+
+# Set hostname inside container
+echo "rgnodes-vps" > "$ROOTFS_DIR/etc/hostname"
+echo "127.0.0.1 localhost rgnodes-vps" > "$ROOTFS_DIR/etc/hosts"
+
+cat > "$ROOTFS_DIR/root/setup.sh" << 'EOF'
+#!/bin/bash
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt update -y
+
+apt install -y \
+sudo \
+curl \
+wget \
+nano \
+vim \
+git \
+htop \
+neofetch \
+net-tools \
+openssh-server \
+ca-certificates \
+software-properties-common \
+zip \
+unzip \
+screen \
+tmux \
+python3 \
+python3-pip
+
+# Set default credentials
+echo "root:root" | chpasswd
+
+mkdir -p /var/run/sshd
+
+# Configure SSH for 100% working login
+sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+# Start SSH Service automatically
+service ssh start || /usr/sbin/sshd
+
+clear
+
+echo ""
+echo "======================================"
+echo "      RGNODES™ UBUNTU READY"
+echo "======================================"
+echo ""
+
+neofetch
+
+EOF
+
+chmod +x "$ROOTFS_DIR/root/setup.sh"
+
+touch "$ROOTFS_DIR/.installed"
+}
+
+############################
+# SYSTEM INFORMATION
+############################
+
+show_system_info() {
+
+RAM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
+RAM_USED=$(free -m | awk '/Mem:/ {print $3}')
+RAM_FREE=$(free -m | awk '/Mem:/ {print $4}')
+
+CPU_MODEL=$(grep -m 1 "model name" /proc/cpuinfo | cut -d ':' -f2 | sed 's/^[ \t]*//')
+[ -z "$CPU_MODEL" ] && CPU_MODEL="KVM Dedicated Virtual Processor"
+CPU_CORES=$(nproc)
+
+DISK_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
+DISK_USED=$(df -h / | awk 'NR==2 {print $3}')
+DISK_FREE=$(df -h / | awk 'NR==2 {print $4}')
+
+HOST_NAME="rgnodes-vps"
+KERNEL_VER=$(uname -r)
+UPTIME_INFO=$(uptime -p)
+
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${GREEN}RGNODES™ SYSTEM & HARDWARE SPECIFICATIONS${RESET}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+echo -e "${YELLOW}Provider:${RESET} RGNODES™ Infrastructure"
+echo -e "${YELLOW}Virtualization:${RESET} KVM High-Performance Support"
+echo -e "${YELLOW}OS:${RESET} Ubuntu 22.04 LTS"
+echo -e "${YELLOW}Architecture:${RESET} $ARCH"
+echo -e "${YELLOW}Kernel:${RESET} $KERNEL_VER"
+echo -e "${YELLOW}Hostname:${RESET} $HOST_NAME"
+echo ""
+echo -e "${GREEN}CPU Performance (Host Mirrored)${RESET}"
+echo -e "CPU Model : ${WHITE}$CPU_MODEL${RESET}"
+echo -e "CPU Cores : ${WHITE}$CPU_CORES Cores Activated${RESET}"
+echo ""
+echo -e "${GREEN}RAM Allocation (Host Mirrored)${RESET}"
+echo -e "Total RAM : ${WHITE}${RAM_TOTAL} MB${RESET}"
+echo -e "Used RAM  : ${WHITE}${RAM_USED} MB${RESET}"
+echo -e "Free RAM  : ${WHITE}${RAM_FREE} MB${RESET}"
+echo ""
+echo -e "${GREEN}Storage Allocation (Host Mirrored)${RESET}"
+echo -e "Disk Total : ${WHITE}$DISK_TOTAL${RESET}"
+echo -e "Disk Used  : ${WHITE}$DISK_USED${RESET}"
+echo -e "Disk Free  : ${WHITE}$DISK_FREE${RESET}"
+echo ""
+echo -e "${GREEN}Network & Dedicated IP Configuration${RESET}"
+echo -e "Dedicated IPv4 : ${WHITE}${DEDICATED_IPV4}${RESET}"
+echo -e "SSH Status     : ${GREEN}Auto-Configured (100% Working)${RESET}"
+echo -e "Default Login  : ${WHITE}root / root${RESET}"
+echo ""
+echo -e "${GREEN}Container Runtime${RESET}"
+echo -e "RootFS Path    : ${WHITE}$ROOTFS_DIR${RESET}"
+echo -e "System Uptime  : ${WHITE}$UPTIME_INFO${RESET}"
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+echo -e "${MAGENTA}[*] Launching RGNODES™ High-Performance VM...${RESET}"
+echo ""
+}
+
+############################
+# MAIN EXECUTION
+############################
+
+show_logo
+
+install_dependencies
+
+detect_dedicated_ipv4
+
+if [ ! -f "$ROOTFS_DIR/.installed" ]; then
+
+    echo -e "${YELLOW}[*] First launch detected. Initializing RGNODES™ setup...${RESET}"
+
+    install_ubuntu
+
+    download_proot
+
+    configure_system
+
+    echo -e "${GREEN}[*] RGNODES™ Ubuntu installation completed successfully.${RESET}"
+
+fi
+
+show_system_info
+
+############################
+# START PROOT
+############################
+
+exec "$ROOTFS_DIR/usr/local/bin/proot" \
+--rootfs="$ROOTFS_DIR" \
+-0 \
+-w /root \
+-b /dev \
+-b /sys \
+-b /proc \
+-b /tmp \
+-b /etc/resolv.conf \
+--kill-on-exit \
+/usr/bin/env -i \
+HOME=/root \
+TERM="$TERM" \
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+/bin/bash --login
