@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
 ############################################################
 #                                                          #
 #                 RGNODES™ TUNNEL MANAGER                  #
 #       Multi-Tunnel • TryCloudflare & Pinggy TCP          #
 #                                                          #
-#     All-In-One • Auto-Skip • 24/7 PM2 • Auto-Boot        #
+#     Auto-Skip • 24/7 PM2 • Auto-Boot • Clickable Links   #
 #                                                          #
 ############################################################
 
@@ -12,7 +12,7 @@
 # 1. SHELL GUARD & SAFE ENV
 ############################
 if [ -z "${BASH_VERSION:-}" ]; then
-  printf "✖ Use bash: bash %s\n" "$0" >&2
+  printf "✖ Run with bash: bash %s\n" "$0" >&2
   exit 1
 fi
 set -u
@@ -86,8 +86,8 @@ copy_to_clipboard() {
 ############################
 show_progress() {
   local task_name="$1"
-  local delay="${2:-0.006}"
-  local i filled empty bar pad
+  local delay="${2:-0.005}"
+  local i filled empty bar pad j
   info_msg "Loading: ${task_name}"
   for ((i = 1; i <= 100; i++)); do
     filled=$((i / 5))
@@ -108,13 +108,13 @@ show_progress() {
 # 4. 100% AUTO-SKIP SYSTEM INIT
 ############################
 detect_pkg_mgr() {
-  if command -v apt-get >/dev/null 2>&1; then echo "apt"
-  elif command -v apk >/dev/null 2>&1; then echo "apk"
-  elif command -v dnf >/dev/null 2>&1; then echo "dnf"
-  elif command -v yum >/dev/null 2>&1; then echo "yum"
-  elif command -v pacman >/dev/null 2>&1; then echo "pacman"
-  elif command -v pkg >/dev/null 2>&1; then echo "pkg"
-  else echo "unknown"
+  if command -v apt-get >/dev/null 2>&1; then printf "apt"
+  elif command -v apk >/dev/null 2>&1; then printf "apk"
+  elif command -v dnf >/dev/null 2>&1; then printf "dnf"
+  elif command -v yum >/dev/null 2>&1; then printf "yum"
+  elif command -v pacman >/dev/null 2>&1; then printf "pacman"
+  elif command -v pkg >/dev/null 2>&1; then printf "pkg"
+  else printf "unknown"
   fi
 }
 
@@ -144,7 +144,7 @@ system_init() {
   printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
 
   local missing=0 pkg pm
-  for pkg in curl npm procps psmisc neofetch; do
+  for pkg in curl npm procps psmisc; do
     if ! has_pkg "$pkg"; then
       missing=1
       break
@@ -154,7 +154,7 @@ system_init() {
 
   if [[ "$missing" -eq 0 ]]; then
     ok "All pkgs & Node 22 ready — 100% skipped."
-    sleep 0.4
+    sleep 0.3
     return 0
   fi
 
@@ -166,7 +166,7 @@ system_init() {
       show_progress "APT Update"
       apt-get update -y >/dev/null 2>&1 || true
       local pkgs=()
-      for pkg in curl procps psmisc neofetch; do
+      for pkg in curl procps psmisc ca-certificates; do
         has_pkg "$pkg" || pkgs+=("$pkg")
       done
       if [[ "${#pkgs[@]}" -gt 0 ]]; then
@@ -183,7 +183,7 @@ system_init() {
       show_progress "APK Update"
       apk update >/dev/null 2>&1 || true
       local pkgs=()
-      for pkg in curl nodejs npm procps psmisc neofetch bash; do
+      for pkg in curl nodejs npm procps psmisc bash ca-certificates; do
         has_pkg "$pkg" || pkgs+=("$pkg")
       done
       if [[ "${#pkgs[@]}" -gt 0 ]]; then
@@ -195,7 +195,7 @@ system_init() {
       show_progress "RPM Update"
       "$pm" update -y >/dev/null 2>&1 || true
       local pkgs=()
-      for pkg in curl nodejs npm procps-ng psmisc neofetch; do
+      for pkg in curl nodejs npm procps-ng psmisc ca-certificates; do
         has_pkg "$pkg" || pkgs+=("$pkg")
       done
       if [[ "${#pkgs[@]}" -gt 0 ]]; then
@@ -205,25 +205,18 @@ system_init() {
       ;;
     pacman)
       show_progress "Pacman Sync"
-      pacman -Sy --noconfirm curl nodejs npm procps-ng psmisc neofetch >/dev/null 2>&1 || true
+      pacman -Sy --noconfirm curl nodejs npm procps-ng psmisc ca-certificates >/dev/null 2>&1 || true
       ;;
     pkg)
       show_progress "PKG Update"
       pkg update -y >/dev/null 2>&1 || true
-      pkg install -y curl nodejs npm procps psmisc neofetch >/dev/null 2>&1 || true
+      pkg install -y curl nodejs npm procps psmisc ca-certificates >/dev/null 2>&1 || true
       ;;
     *)
       fail "Unsupported OS/pkg mgr."
       exit 1
       ;;
   esac
-
-  if command -v neofetch >/dev/null 2>&1; then
-    printf "%b" "$MAGENTA"
-    neofetch --off 2>/dev/null || true
-    printf "%b" "$RESET"
-    sleep 1.2
-  fi
 }
 
 ############################
@@ -231,15 +224,15 @@ system_init() {
 ############################
 detect_init_sys() {
   if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
-    echo "systemd"
+    printf "systemd"
   elif command -v rc-service >/dev/null 2>&1; then
-    echo "openrc"
+    printf "openrc"
   elif [[ -d /etc/init.d ]]; then
-    echo "sysvinit"
+    printf "sysvinit"
   elif [[ -d /data/data/com.termux ]]; then
-    echo "termux"
+    printf "termux"
   else
-    echo "proot/shell"
+    printf "proot/shell"
   fi
 }
 
@@ -255,8 +248,7 @@ configure_pm2_startup() {
     pm2 save --force >/dev/null 2>&1 || pm2 save >/dev/null 2>&1 || true
   fi
 
-  # Fallback resurrect hook for PRoot / Termux / non-systemd containers
-  local init_sys
+  local init_sys rc_file
   init_sys=$(detect_init_sys)
   if [[ "$init_sys" != "systemd" ]]; then
     for rc_file in "${HOME}/.bashrc" "${HOME}/.profile"; do
@@ -293,11 +285,13 @@ get_pm2_tunnel_names() {
     process.stdin.on("end", () => {
       try {
         const list = JSON.parse(d);
+        if (!Array.isArray(list)) return;
         list.forEach(p => {
           const exec = (p.pm2_env && p.pm2_env.pm_exec_path) || "";
-          const args = ((p.pm2_env && p.pm2_env.args) || []).join(" ");
-          if (exec.includes("cloudflared") || args.includes("pinggy.io") || p.name.includes("tunnel")) {
-            console.log(p.name);
+          const args = Array.isArray(p.pm2_env && p.pm2_env.args) ? p.pm2_env.args.join(" ") : "";
+          const name = p.name || "";
+          if (exec.includes("cloudflared") || args.includes("pinggy.io") || name.includes("tunnel")) {
+            console.log(name);
           }
         });
       } catch (e) {}
@@ -314,30 +308,36 @@ get_pm2_proc_status() {
     process.stdin.on("end", () => {
       try {
         const list = JSON.parse(d);
-        const found = list.find(p => p.name === target);
+        const found = Array.isArray(list) ? list.find(p => p.name === target) : null;
         console.log(found && found.pm2_env ? (found.pm2_env.status || "unknown") : "missing");
       } catch (e) { console.log("unknown"); }
     });
-  ' "$name" 2>/dev/null || echo "unknown"
+  ' "$name" 2>/dev/null || printf "unknown"
 }
 
 extract_link_for_process() {
   local pm_name="$1"
   command -v pm2 >/dev/null 2>&1 || return 0
-  pm2 logs "$pm_name" --lines 100 --nostream 2>/dev/null \
+  pm2 logs "$pm_name" --lines 120 --nostream 2>/dev/null \
     | grep -oE 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com|tcp://[a-zA-Z0-9.-]*:[0-9]*|https://[a-zA-Z0-9.-]*\.pinggy\.(link|io)' \
     | tail -n 1 || true
 }
 
 check_local_port() {
   local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
   if command -v ss >/dev/null 2>&1; then
-    ss -tln 2>/dev/null | grep -q ":${port} " && return 0
+    ss -tln 2>/dev/null | grep -qE "[:.]${port}[[:space:]]" && return 0
   fi
   if command -v netstat >/dev/null 2>&1; then
-    netstat -tln 2>/dev/null | grep -q ":${port} " && return 0
+    netstat -tln 2>/dev/null | grep -qE "[:.]${port}[[:space:]]" && return 0
   fi
   (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1
+}
+
+validate_port() {
+  local p="$1"
+  [[ "$p" =~ ^[0-9]+$ ]] && [[ "$p" -ge 1 && "$p" -le 65535 ]]
 }
 
 ############################
@@ -411,7 +411,7 @@ show_banner() {
 
 exit_anim() {
   ok "Bye! ∆"
-  sleep 0.3
+  sleep 0.25
   exit 0
 }
 
@@ -421,7 +421,7 @@ exit_anim() {
 install_tunnel() {
   clear
   printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
-  printf "%b 🚀 ADD TUNNEL (CF / PINGGY)%b\n" "$GREEN$BOLD" "$RESET"
+  printf "%b 🚀 ADD TUNNEL (HTTP/HTTPS/TCP)%b\n" "$GREEN$BOLD" "$RESET"
   printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
 
   local default_name="tunnel-1" idx=1
@@ -434,37 +434,58 @@ install_tunnel() {
 
   read -r -p "Name [${default_name}]: " PM2_NAME
   PM2_NAME="${PM2_NAME:-$default_name}"
+  PM2_NAME="${PM2_NAME//[^a-zA-Z0-9_-]/-}"
+  [[ -z "$PM2_NAME" ]] && PM2_NAME="$default_name"
 
   read -r -p "Proto (http/https/tcp) [http]: " PROTOCOL
   PROTOCOL="${PROTOCOL:-http}"
-  PROTOCOL_LOWER=$(printf "%s" "$PROTOCOL" | tr '[:upper:]' '[:lower:]')
+  PROTOCOL_LOWER=$(printf "%s" "$PROTOCOL" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
 
-  NOTLS_ARG=""
-  TUNNEL_TARGET=""
-  IS_PINGGY=false
-  TARGET_PORT_DISP=""
+  case "$PROTOCOL_LOWER" in
+    http|https|tcp) ;;
+    *)
+      warn "Unknown proto '${PROTOCOL_LOWER}', using http."
+      PROTOCOL_LOWER="http"
+      ;;
+  esac
+
+  local NOTLS_ARG="" TUNNEL_TARGET="" IS_PINGGY=false TARGET_PORT_DISP=""
+  local LOCAL_PORT="3000" TUNNEL_PORT="3000" NOTLS_CHOICE="T"
 
   if [[ "$PROTOCOL_LOWER" == "tcp" ]]; then
     IS_PINGGY=true
     read -r -p "Local port [3000]: " LOCAL_PORT
     LOCAL_PORT="${LOCAL_PORT:-3000}"
+    if ! validate_port "$LOCAL_PORT"; then
+      fail "Invalid port: ${LOCAL_PORT}"
+      read -r -p "[Enter] menu..."
+      return 0
+    fi
     TARGET_PORT_DISP="$LOCAL_PORT"
   else
     read -r -p "Local port [3000]: " TUNNEL_PORT
     TUNNEL_PORT="${TUNNEL_PORT:-3000}"
+    if ! validate_port "$TUNNEL_PORT"; then
+      fail "Invalid port: ${TUNNEL_PORT}"
+      read -r -p "[Enter] menu..."
+      return 0
+    fi
     TARGET_PORT_DISP="$TUNNEL_PORT"
-    TUNNEL_TARGET="${PROTOCOL_LOWER}://localhost:${TUNNEL_PORT}"
+    TUNNEL_TARGET="${PROTOCOL_LOWER}://127.0.0.1:${TUNNEL_PORT}"
     if [[ "$PROTOCOL_LOWER" == "https" ]]; then
-      read -r -p "NoTLSVerify [T/F] [T]: " NOTLS_CHOICE
-      NOTLS_CHOICE="${NOTLS_CHOICE:-T}"
-      [[ "${NOTLS_CHOICE,,}" == "t" ]] && NOTLS_ARG="--no-tls-verify"
+      read -r -p "Skip TLS verify [y/N] [N]: " NOTLS_CHOICE
+      NOTLS_CHOICE="${NOTLS_CHOICE:-N}"
+      case "${NOTLS_CHOICE,,}" in
+        y|yes|t|true|1) NOTLS_ARG="--no-tls-verify" ;;
+        *) NOTLS_ARG="" ;;
+      esac
     fi
   fi
 
   if check_local_port "$TARGET_PORT_DISP"; then
-    ok "Port ${TARGET_PORT_DISP} listening."
+    ok "Port ${TARGET_PORT_DISP} active."
   else
-    warn "Port ${TARGET_PORT_DISP} not listening yet."
+    warn "Port ${TARGET_PORT_DISP} closed."
   fi
 
   step "Deps Check (Auto-Skip)"
@@ -487,6 +508,7 @@ install_tunnel() {
         apk) apk add --no-cache openssh-client >/dev/null 2>&1 || true ;;
         dnf|yum) "$pm" install -y openssh-clients >/dev/null 2>&1 || true ;;
         pacman) pacman -Sy --noconfirm openssh >/dev/null 2>&1 || true ;;
+        pkg) pkg install -y openssh >/dev/null 2>&1 || true ;;
       esac
     fi
   else
@@ -494,16 +516,24 @@ install_tunnel() {
       ok "cloudflared ready — skipped."
     else
       show_progress "Fetch cloudflared"
-      local arch cf_url
+      local arch cf_url tmp_cf
       arch="$(uname -m)"
       if [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
         cf_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
       else
         cf_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
       fi
-      curl -fsSL --output /usr/local/bin/cloudflared "$cf_url"
-      chmod +x /usr/local/bin/cloudflared
-      ok "cloudflared installed."
+      tmp_cf="/tmp/cloudflared.$$"
+      if curl -fsSL --retry 3 --output "$tmp_cf" "$cf_url" && [[ -s "$tmp_cf" ]]; then
+        mv "$tmp_cf" /usr/local/bin/cloudflared
+        chmod +x /usr/local/bin/cloudflared
+        ok "cloudflared ready."
+      else
+        rm -f "$tmp_cf"
+        fail "cloudflared download failed."
+        read -r -p "[Enter] menu..."
+        return 0
+      fi
     fi
   fi
 
@@ -513,19 +543,19 @@ install_tunnel() {
   if [[ "$IS_PINGGY" == true ]]; then
     pm2 start ssh --name "$PM2_NAME" \
       --restart-delay=3000 --max-restarts=999999 -- \
-      -p 443 -o StrictHostKeyChecking=no \
+      -p 443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o ServerAliveInterval=15 -o ServerAliveCountMax=5 \
-      -R0:localhost:"$LOCAL_PORT" tcp@free.pinggy.io >/dev/null 2>&1
+      -R0:127.0.0.1:"$LOCAL_PORT" tcp@free.pinggy.io >/dev/null 2>&1
   else
-    local cmd_args="--url ${TUNNEL_TARGET}"
-    [[ -n "$NOTLS_ARG" ]] && cmd_args="${cmd_args} ${NOTLS_ARG}"
+    local cmd_args=("tunnel" "--url" "$TUNNEL_TARGET")
+    [[ -n "$NOTLS_ARG" ]] && cmd_args+=("$NOTLS_ARG")
     pm2 start /usr/local/bin/cloudflared --name "$PM2_NAME" \
       --restart-delay=3000 --max-restarts=999999 -- \
-      ${cmd_args} >/dev/null 2>&1
+      "${cmd_args[@]}" >/dev/null 2>&1
   fi
 
   configure_pm2_startup
-  info_msg "Waiting for tunnel URL..."
+  info_msg "Fetching live URL..."
 
   local TUNNEL_LINK="" i
   for ((i = 1; i <= 15; i++)); do
@@ -542,6 +572,13 @@ install_tunnel() {
   printf "\n%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$GREEN" "$RESET"
   ok "ONLINE: ${PM2_NAME}"
   printf " %bProto%b : %b%s%b | %bPort%b : %b%s%b\n" "$WHITE" "$RESET" "$CYAN$BOLD" "${PROTOCOL_LOWER^^}" "$RESET" "$WHITE" "$RESET" "$CYAN$BOLD" "$TARGET_PORT_DISP" "$RESET"
+  if [[ "$PROTOCOL_LOWER" == "https" ]]; then
+    if [[ -n "$NOTLS_ARG" ]]; then
+      printf " %bTLS%b   : %bSkip Verify (--no-tls-verify)%b\n" "$WHITE" "$RESET" "$YELLOW$BOLD" "$RESET"
+    else
+      printf " %bTLS%b   : %bStrict Verify%b\n" "$WHITE" "$RESET" "$GREEN$BOLD" "$RESET"
+    fi
+  fi
   if [[ -n "$TUNNEL_LINK" ]]; then
     printf " %bLink%b  : " "$WHITE" "$RESET"
     clickable_link "$TUNNEL_LINK"
@@ -596,7 +633,7 @@ manage_tunnels() {
     RA)
       for t_name in "${tunnels[@]}"; do pm2 restart "$t_name" >/dev/null 2>&1 || true; done
       configure_pm2_startup
-      ok "All tunnels restarted."
+      ok "All restarted."
       read -r -p "[Enter] menu..."
       return 0
       ;;
@@ -605,7 +642,7 @@ manage_tunnels() {
       pkill -f cloudflared >/dev/null 2>&1 || true
       rm -f /usr/local/bin/cloudflared
       configure_pm2_startup
-      ok "All tunnels removed."
+      ok "All removed."
       read -r -p "[Enter] menu..."
       return 0
       ;;
@@ -614,4 +651,103 @@ manage_tunnels() {
   local TARGET_NAME="$SEL"
   if [[ "$SEL" =~ ^[0-9]+$ ]] && [[ "$SEL" -ge 1 && "$SEL" -le "${#tunnels[@]}" ]]; then
     TARGET_NAME="${tunnels[$((SEL - 1))]}"
- 
+  fi
+
+  read -r -p "Act on '${TARGET_NAME}' [R]estart / [S]top / [D]el: " ACT
+  case "${ACT,,}" in
+    r) pm2 restart "$TARGET_NAME" >/dev/null 2>&1 && ok "Restarted ${TARGET_NAME}" || fail "Err" ;;
+    s) pm2 stop "$TARGET_NAME" >/dev/null 2>&1 && ok "Stopped ${TARGET_NAME}" || fail "Err" ;;
+    d) pm2 delete "$TARGET_NAME" >/dev/null 2>&1 && ok "Deleted ${TARGET_NAME}" || fail "Err" ;;
+    *) warn "Cancelled." ;;
+  esac
+  configure_pm2_startup
+  read -r -p "[Enter] menu..."
+}
+
+############################
+# 10. [C] LOGS, LINKS & COPY
+############################
+show_logs_status() {
+  clear
+  printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
+  printf "%b 📊 STATUS, LOGS & LINKS%b\n" "$BLUE$BOLD" "$RESET"
+  printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
+
+  if ! command -v pm2 >/dev/null 2>&1; then
+    warn "PM2 missing."
+    read -r -p "[Enter] menu..."
+    return 0
+  fi
+
+  pm2 status || true
+  printf "\n"
+
+  local tunnels=() t_name found=0 last_link="" link
+  while IFS= read -r t_name; do
+    [[ -n "$t_name" ]] && tunnels+=("$t_name")
+  done < <(get_pm2_tunnel_names)
+
+  for t_name in "${tunnels[@]}"; do
+    link=$(extract_link_for_process "$t_name")
+    if [[ -n "$link" ]]; then
+      found=1
+      last_link="$link"
+      printf " %b✔%b %b%-10s%b : " "$GREEN" "$RESET" "$WHITE$BOLD" "$t_name" "$RESET"
+      clickable_link "$link"
+      printf "\n"
+    else
+      printf " %b⚠%b %b%-10s%b : %bNo URL yet%b\n" "$YELLOW" "$RESET" "$WHITE$BOLD" "$t_name" "$RESET" "$DIM" "$RESET"
+    fi
+  done
+
+  if [[ "$found" -eq 0 ]]; then
+    info_msg "No URLs found."
+  elif [[ -n "$last_link" ]] && copy_to_clipboard "$last_link"; then
+    info_msg "Copied latest URL."
+  fi
+
+  printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
+  read -r -p "[Enter] menu..."
+}
+
+############################
+# 11. [D] BOOT SYNC & RESURRECT
+############################
+setup_reboot_persistence() {
+  clear
+  step "Syncing PM2 Boot & Resurrect"
+  if ! command -v pm2 >/dev/null 2>&1; then
+    warn "PM2 missing."
+    read -r -p "[Enter] menu..."
+    return 0
+  fi
+  configure_pm2_startup
+  pm2 resurrect >/dev/null 2>&1 || true
+  ok "Boot sync done ($(detect_init_sys))."
+  read -r -p "[Enter] menu..."
+}
+
+############################
+# 12. MAIN LOOP
+############################
+system_init
+
+while true; do
+  show_banner
+  printf " %b[A]%b Add Tunnel\n" "$WHITE$BOLD" "$RESET"
+  printf " %b[B]%b Manage (R/S/D/ALL)\n" "$WHITE$BOLD" "$RESET"
+  printf " %b[C]%b Logs & Links\n" "$WHITE$BOLD" "$RESET"
+  printf " %b[D]%b Boot Sync\n" "$WHITE$BOLD" "$RESET"
+  printf " %b[E]%b Exit\n" "$WHITE$BOLD" "$RESET"
+  printf "%b━━━━━━━━━━━━ ∆ ━━━━━━━━━━━━%b\n" "$CYAN" "$RESET"
+  read -r -p "Opt [A-E]: " CHOICE
+
+  case "${CHOICE,,}" in
+    a) install_tunnel ;;
+    b) manage_tunnels ;;
+    c) show_logs_status ;;
+    d) setup_reboot_persistence ;;
+    e) exit_anim ;;
+    *) warn "Invalid: ${CHOICE}"; sleep 0.6 ;;
+  esac
+done
